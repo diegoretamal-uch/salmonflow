@@ -1,0 +1,20 @@
+# Docker volume data
+data/input/*
+data/references/*
+data/output/*
+data/tmp/*
+
+# Keep the placeholder files
+!data/input/.gitkeep
+!data/references/.gitkeep
+!data/output/.gitkeep
+!data/tmp/.gitkeep
+
+# R session artifacts
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# OS
+.DS_Store

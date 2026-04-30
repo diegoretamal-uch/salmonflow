@@ -1,0 +1,396 @@
+/* ═══════════════════════════════════════════════════════════
+   SalmonFlow — custom.css
+   Dark-themed, modern aesthetic for RNA-seq pipeline UI
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── CSS Variables ─────────────────────────────────────────── */
+:root {
+  --sf-bg-primary:    #0f1117;
+  --sf-bg-secondary:  #1a1d27;
+  --sf-bg-card:       #22263280;
+  --sf-accent:        #4fc3f7;
+  --sf-accent-glow:   #4fc3f733;
+  --sf-success:       #66bb6a;
+  --sf-warning:       #ffa726;
+  --sf-error:         #ef5350;
+  --sf-text:          #e0e0e0;
+  --sf-text-muted:    #8a8fa0;
+  --sf-border:        #2d3140;
+  --sf-radius:        8px;
+  --sf-transition:    0.25s ease;
+}
+
+/* ── Global Overrides ──────────────────────────────────────── */
+body, .content-wrapper, .main-sidebar, .left-side {
+  background-color: var(--sf-bg-primary) !important;
+  color: var(--sf-text) !important;
+}
+
+.skin-black .main-header .logo,
+.skin-black .main-header .navbar {
+  background: linear-gradient(135deg, #1a1d27 0%, #0f1117 100%) !important;
+  border-bottom: 1px solid var(--sf-border);
+}
+
+.skin-black .main-header .logo {
+  color: var(--sf-accent) !important;
+  font-size: 18px;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────── */
+.skin-black .main-sidebar {
+  background: linear-gradient(180deg, #14171f 0%, #0b0d13 100%) !important;
+  border-right: 1px solid var(--sf-border);
+}
+
+.sidebar-menu > li > a {
+  color: var(--sf-text-muted) !important;
+  border-left: 3px solid transparent;
+  transition: all var(--sf-transition);
+  font-size: 14px;
+  padding: 13px 18px;
+}
+
+.sidebar-menu > li > a:hover {
+  background: var(--sf-accent-glow) !important;
+  color: var(--sf-accent) !important;
+  border-left-color: var(--sf-accent);
+}
+
+.sidebar-menu > li.active > a {
+  background: var(--sf-accent-glow) !important;
+  color: var(--sf-accent) !important;
+  border-left: 3px solid var(--sf-accent);
+  font-weight: 600;
+}
+
+.sidebar-menu > li > a > .fa,
+.sidebar-menu > li > a > .fas,
+.sidebar-menu > li > a > .far {
+  color: inherit !important;
+}
+
+/* ── Boxes & Cards ─────────────────────────────────────────── */
+.box {
+  background: var(--sf-bg-secondary) !important;
+  border: 1px solid var(--sf-border) !important;
+  border-radius: var(--sf-radius) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
+  margin-bottom: 20px;
+}
+
+.box-header {
+  border-bottom: 1px solid var(--sf-border) !important;
+  background: transparent !important;
+}
+
+.box-header .box-title {
+  color: var(--sf-text) !important;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.box-body {
+  color: var(--sf-text);
+}
+
+/* ── Form Inputs ───────────────────────────────────────────── */
+.form-control,
+.selectize-input,
+.selectize-dropdown {
+  background: var(--sf-bg-primary) !important;
+  color: var(--sf-text) !important;
+  border: 1px solid var(--sf-border) !important;
+  border-radius: 6px !important;
+  transition: border-color var(--sf-transition);
+}
+
+.form-control:focus,
+.selectize-input.focus {
+  border-color: var(--sf-accent) !important;
+  box-shadow: 0 0 0 2px var(--sf-accent-glow) !important;
+}
+
+.selectize-dropdown-content .option {
+  color: var(--sf-text) !important;
+}
+
+.selectize-dropdown-content .option.active {
+  background: var(--sf-accent-glow) !important;
+  color: var(--sf-accent) !important;
+}
+
+label, .control-label {
+  color: var(--sf-text-muted) !important;
+  font-weight: 500;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ── Radio & Checkbox ──────────────────────────────────────── */
+.radio label, .checkbox label {
+  color: var(--sf-text) !important;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ── Buttons ───────────────────────────────────────────────── */
+.btn-primary {
+  background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%) !important;
+  border: none !important;
+  color: #0f1117 !important;
+  font-weight: 700;
+  border-radius: 6px !important;
+  padding: 10px 24px;
+  transition: all var(--sf-transition);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 13px;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(79,195,247,0.35) !important;
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #66bb6a 0%, #43a047 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 600;
+  border-radius: 6px !important;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #ef5350 0%, #e53935 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 600;
+  border-radius: 6px !important;
+}
+
+.btn-default, .btn-info {
+  background: var(--sf-bg-card) !important;
+  border: 1px solid var(--sf-border) !important;
+  color: var(--sf-text) !important;
+  border-radius: 6px !important;
+}
+
+.btn-default:hover, .btn-info:hover {
+  border-color: var(--sf-accent) !important;
+  color: var(--sf-accent) !important;
+}
+
+/* ── Sliders ───────────────────────────────────────────────── */
+.irs--shiny .irs-bar {
+  background: var(--sf-accent) !important;
+  border-color: var(--sf-accent) !important;
+}
+
+.irs--shiny .irs-handle {
+  background: var(--sf-accent) !important;
+  border: 2px solid #fff !important;
+  box-shadow: 0 2px 8px rgba(79,195,247,0.4);
+}
+
+.irs--shiny .irs-line {
+  background: var(--sf-border) !important;
+}
+
+.irs--shiny .irs-from, .irs--shiny .irs-to, .irs--shiny .irs-single {
+  background: var(--sf-accent) !important;
+  color: #0f1117 !important;
+  font-weight: 600;
+}
+
+/* ── DataTables ────────────────────────────────────────────── */
+.dataTables_wrapper {
+  color: var(--sf-text) !important;
+}
+
+table.dataTable {
+  background: var(--sf-bg-primary) !important;
+  color: var(--sf-text) !important;
+  border-collapse: collapse !important;
+}
+
+table.dataTable thead th,
+table.dataTable thead td {
+  background: var(--sf-bg-secondary) !important;
+  color: var(--sf-accent) !important;
+  border-bottom: 2px solid var(--sf-border) !important;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+table.dataTable tbody tr {
+  background: var(--sf-bg-primary) !important;
+  transition: background var(--sf-transition);
+}
+
+table.dataTable tbody tr:hover {
+  background: var(--sf-accent-glow) !important;
+}
+
+table.dataTable tbody td {
+  border-top: 1px solid var(--sf-border) !important;
+  padding: 10px 14px;
+}
+
+.dataTables_info, .dataTables_length label, .dataTables_filter label {
+  color: var(--sf-text-muted) !important;
+}
+
+.dataTables_paginate .paginate_button {
+  color: var(--sf-text) !important;
+  background: var(--sf-bg-card) !important;
+  border: 1px solid var(--sf-border) !important;
+  border-radius: 4px !important;
+}
+
+.dataTables_paginate .paginate_button.current {
+  background: var(--sf-accent) !important;
+  color: #0f1117 !important;
+  font-weight: 700;
+}
+
+/* ── Log Panel ─────────────────────────────────────────────── */
+.log-panel {
+  background: #0a0c10;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 16px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #b0bec5;
+  max-height: 420px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-panel .log-timestamp {
+  color: var(--sf-text-muted);
+}
+
+.log-panel .log-success {
+  color: var(--sf-success);
+}
+
+.log-panel .log-error {
+  color: var(--sf-error);
+}
+
+.log-panel .log-info {
+  color: var(--sf-accent);
+}
+
+/* ── Progress Bar ──────────────────────────────────────────── */
+.progress {
+  background: var(--sf-bg-primary) !important;
+  border-radius: 20px !important;
+  height: 24px !important;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.3);
+  border: 1px solid var(--sf-border);
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, #4fc3f7 0%, #29b6f6 50%, #0288d1 100%) !important;
+  border-radius: 20px !important;
+  transition: width 0.8s ease !important;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 24px !important;
+}
+
+/* ── Status Badges ─────────────────────────────────────────── */
+.badge-success {
+  background: var(--sf-success) !important;
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge-running {
+  background: var(--sf-warning) !important;
+  color: #0f1117;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  animation: pulse 1.5s infinite;
+}
+
+.badge-error {
+  background: var(--sf-error) !important;
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+/* ── Summary Config Box ────────────────────────────────────── */
+.config-summary {
+  background: var(--sf-bg-card);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 14px 18px;
+  font-size: 13px;
+  color: var(--sf-text-muted);
+  line-height: 1.8;
+}
+
+.config-summary strong {
+  color: var(--sf-text);
+}
+
+/* ── Validation Messages ───────────────────────────────────── */
+.shiny-output-error {
+  color: var(--sf-error) !important;
+}
+
+.validation-ok {
+  color: var(--sf-success);
+  font-weight: 600;
+}
+
+.validation-warn {
+  color: var(--sf-warning);
+  font-weight: 600;
+}
+
+/* ── Tab Content Spacing ───────────────────────────────────── */
+.tab-content > .tab-pane {
+  padding: 6px;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--sf-bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sf-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}

@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  salmonflow:
+    build: .
+    image: salmonflow:latest
+    container_name: salmonflow
+    ports:
+      - "3838:3838"
+    volumes:
+      - ./app:/srv/shiny-server/salmonflow
+      - ./data/input:/data/input
+      - ./data/references:/data/references
+      - ./data/output:/data/output
+      - ./data/tmp:/data/tmp
+    environment:
+      - SHINY_LOG_LEVEL=TRACE
+    command: >
+      R -e "options(shiny.autoreload=TRUE);
+            shiny::runApp('/srv/shiny-server/salmonflow',
+                          host='0.0.0.0', port=3838)"
+    restart: unless-stopped
