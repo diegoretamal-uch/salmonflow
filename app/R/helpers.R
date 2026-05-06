@@ -48,14 +48,11 @@ detect_fastq_pairs <- function(dir_path) {
   r2_files <- files[grepl(r2_pattern, basenames)]
 
   if (length(r1_files) > 0 && length(r1_files) == length(r2_files)) {
-    # Paired-end detected
-    sample_names <- gsub(r1_pattern, "_", basename(r1_files))
-    sample_names <- gsub("\\.(fastq|fq)(\\.gz)?$", "", sample_names, ignore.case = TRUE)
-    sample_names <- gsub("_$", "", sample_names)
-
-    # Sort to ensure matching
+    # Paired-end detected — sort first so names and paths stay aligned
     r1_files <- sort(r1_files)
     r2_files <- sort(r2_files)
+    # Remove the R1 marker and everything after it (extension included)
+    sample_names <- sub(paste0(r1_pattern, ".*$"), "", basename(r1_files))
 
     data.frame(
       name  = sample_names,

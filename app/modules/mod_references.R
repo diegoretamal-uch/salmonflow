@@ -76,7 +76,7 @@ mod_references_ui <- function(id) {
           fluidRow(
             column(4,
               checkboxInput(ns("decoy_aware"), "Decoy-aware indexing", value = FALSE),
-              helpText("Recomendado para mayor precisión — requiere genoma FASTA")
+              helpText("Mayor precisión — requiere genoma FASTA (.fa/.fa.gz). El pipeline genera gentrome y decoys.txt automáticamente.")
             ),
             column(4,
               conditionalPanel(

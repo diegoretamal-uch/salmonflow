@@ -114,9 +114,10 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
 }
 
 #' Build a Salmon index
-#' @param fasta Path to transcriptome FASTA
+#' @param fasta Path to transcriptome FASTA (plain or .gz)
 #' @param outdir Output directory for the index
-#' @param decoy Path to decoy file (optional)
+#' @param decoy Path to GENOME FASTA for decoy-aware indexing (optional).
+#'   The function auto-generates the required gentrome + decoys.txt.
 #' @param kmer k-mer size (default 31)
 #' @param threads Number of threads
 #' @param log_callback Function(msg, type) for live logging
@@ -129,15 +130,77 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
 
   if (!is.null(log_callback)) log_callback("Salmon index: building...", "info")
 
+  t_arg <- fasta
+  d_arg <- NULL
+
+  # ── Decoy-aware: build gentrome + decoys.txt automatically ──
+  # Salmon requires -t <transcriptome+genome.fa> -d <decoy_names.txt>
+  if (!is.null(decoy) && nchar(decoy) > 0 && file.exists(decoy)) {
+    prep_dir     <- file.path(dirname(outdir), "salmon_index_prep")
+    dir.create(prep_dir, showWarnings = FALSE, recursive = TRUE)
+    decoys_file  <- file.path(prep_dir, "decoys.txt")
+    gentrome_file <- file.path(prep_dir, "gentrome.fa")
+
+    # 1. Extract sequence names from the genome FASTA header lines
+    if (!is.null(log_callback)) log_callback("Salmon index: extracting decoy sequence names...", "info")
+    g_gz <- grepl("\\.gz$", decoy, ignore.case = TRUE)
+    names_cmd <- if (g_gz) {
+      paste0("zcat ", shQuote(decoy), " | grep '^>' | cut -d' ' -f1 | sed 's/^>//'")
+    } else {
+      paste0("grep '^>' ", shQuote(decoy), " | cut -d' ' -f1 | sed 's/^>//'")
+    }
+    names_res <- tryCatch(
+      processx::run("bash", args = c("-c", names_cmd)),
+      error = function(e) list(status = 1, stdout = "")
+    )
+    if (!identical(names_res$status, 0L) && !identical(names_res$status, 0)) {
+      if (!is.null(log_callback)) log_callback("Salmon index: failed to extract decoy names", "error")
+      return(list(exit_status = 1, index_dir = outdir))
+    }
+    decoy_names <- Filter(nchar, strsplit(trimws(names_res$stdout), "\n")[[1]])
+    writeLines(decoy_names, decoys_file)
+    if (!is.null(log_callback)) log_callback(
+      paste("Salmon index:", length(decoy_names), "decoy sequences identified"), "info")
+
+    # 2. Concatenate transcriptome + genome into a single gentrome FASTA
+    if (!is.null(log_callback)) log_callback(
+      "Salmon index: concatenating transcriptome + genome into gentrome (may take a few minutes)...", "info")
+    t_gz <- grepl("\\.gz$", fasta, ignore.case = TRUE)
+
+    concat_cmd <- if (t_gz && g_gz) {
+      # Both gzipped — gzip files are concatenable; Salmon reads .gz
+      gentrome_file <- paste0(gentrome_file, ".gz")
+      paste0("cat ", shQuote(fasta), " ", shQuote(decoy), " > ", shQuote(gentrome_file))
+    } else if (!t_gz && !g_gz) {
+      paste0("cat ", shQuote(fasta), " ", shQuote(decoy), " > ", shQuote(gentrome_file))
+    } else if (t_gz) {
+      paste0("{ zcat ", shQuote(fasta), "; cat ",  shQuote(decoy), "; } > ", shQuote(gentrome_file))
+    } else {
+      paste0("{ cat ",  shQuote(fasta), "; zcat ", shQuote(decoy), "; } > ", shQuote(gentrome_file))
+    }
+
+    concat_res <- tryCatch(
+      processx::run("bash", args = c("-c", concat_cmd)),
+      error = function(e) list(status = 1, stderr = conditionMessage(e))
+    )
+    if (!identical(concat_res$status, 0L) && !identical(concat_res$status, 0)) {
+      if (!is.null(log_callback)) log_callback("Salmon index: failed to create gentrome", "error")
+      return(list(exit_status = 1, index_dir = outdir))
+    }
+    if (!is.null(log_callback)) log_callback("Salmon index: gentrome ready", "success")
+
+    t_arg <- gentrome_file
+    d_arg <- decoys_file
+  }
+
+  # ── Run salmon index ─────────────────────────────────────
   args <- c("index",
-            "-t", fasta,
+            "-t", t_arg,
             "-i", outdir,
             "--threads", as.character(threads),
             "-k", as.character(kmer))
 
-  if (!is.null(decoy) && file.exists(decoy)) {
-    args <- c(args, "-d", decoy)
-  }
+  if (!is.null(d_arg)) args <- c(args, "-d", d_arg)
 
   result <- tryCatch(
     processx::run("salmon", args = args, echo = FALSE,

@@ -94,17 +94,20 @@ mod_run_server <- function(id, shared) {
       )
     })
 
-    # ── Local pipeline state ───────────────────────────────
+    # ── Reactive state ─────────────────────────────────────
     rv <- reactiveValues(
-      log_lines      = character(0),
-      running        = FALSE,
-      current_step   = 0,
-      total_steps    = 6,
-      sample_status  = list(),   # named list: sample_name -> "pending"|"running"|"done"|"error"
-      cancel_flag    = FALSE
+      log_lines     = character(0),
+      log_pos       = 0L,
+      running       = FALSE,
+      proc          = NULL,
+      log_file      = NULL,
+      state_file    = NULL,
+      current_step  = 0,
+      total_steps   = 6,
+      sample_status = list()
     )
 
-    # Log helper
+    # Shiny-side log helper (for validation messages, cancel, etc.)
     add_log <- function(msg, type = "info") {
       rv$log_lines <- c(rv$log_lines, timestamp_log(msg, type))
     }
@@ -121,7 +124,7 @@ mod_run_server <- function(id, shared) {
       }
     })
 
-    # ── Progress bar update ────────────────────────────────
+    # ── Progress bar ───────────────────────────────────────
     observe({
       pct <- if (rv$total_steps > 0) round(rv$current_step / rv$total_steps * 100) else 0
       shinyjs::runjs(sprintf(
@@ -145,7 +148,7 @@ mod_run_server <- function(id, shared) {
     # ── Per-sample status ──────────────────────────────────
     output$sample_status_list <- renderUI({
       statuses <- rv$sample_status
-      if (length(statuses) == 0) return(tags$p(style="color:#5a6373;", "—"))
+      if (length(statuses) == 0) return(tags$p(style = "color:#5a6373;", "—"))
 
       tags$div(
         lapply(names(statuses), function(s) {
@@ -163,239 +166,170 @@ mod_run_server <- function(id, shared) {
       )
     })
 
-    # ── Cancel button ──────────────────────────────────────
-    observeEvent(input$cancel_btn, {
-      if (rv$running) {
-        rv$cancel_flag <- TRUE
-        add_log("Pipeline cancelado por el usuario", "warn")
-        rv$running <- FALSE
+    # ── Polling observer ───────────────────────────────────
+    observe({
+      if (!rv$running) return()
+      invalidateLater(500, session)
+
+      # Read new log lines from file
+      if (!is.null(rv$log_file) && file.exists(rv$log_file)) {
+        all_lines <- readLines(rv$log_file, warn = FALSE)
+        n_new <- length(all_lines) - rv$log_pos
+        if (n_new > 0) {
+          new_lines <- all_lines[(rv$log_pos + 1L):length(all_lines)]
+          formatted <- vapply(new_lines, function(l) {
+            sep <- regexpr("|", l, fixed = TRUE)
+            if (sep > 0) {
+              timestamp_log(substr(l, sep + 1L, nchar(l)),
+                            substr(l, 1L,       sep - 1L))
+            } else {
+              timestamp_log(l, "info")
+            }
+          }, character(1L))
+          rv$log_lines <- c(rv$log_lines, unname(formatted))
+          rv$log_pos <- length(all_lines)
+        }
+      }
+
+      # Read pipeline state
+      if (!is.null(rv$state_file) && file.exists(rv$state_file)) {
+        state <- tryCatch(
+          jsonlite::fromJSON(rv$state_file),
+          error = function(e) NULL
+        )
+        if (!is.null(state)) {
+          rv$current_step <- state$step  %||% rv$current_step
+          rv$total_steps  <- state$total %||% rv$total_steps
+          ss <- state$sample_status
+          if (!is.null(ss)) rv$sample_status <- as.list(ss)
+
+          if (!isTRUE(state$running)) {
+            rv$running              <- FALSE
+            shared$pipeline_running <- FALSE
+
+            # Load results written by the background script
+            cm_path <- state$count_matrix_path %||% ""
+            if (nchar(cm_path) > 0 && file.exists(cm_path)) {
+              shared$count_matrix <- tryCatch(
+                read.csv(cm_path, check.names = FALSE),
+                error = function(e) NULL
+              )
+            }
+
+            mq_path <- state$multiqc_report_path %||% ""
+            if (nchar(mq_path) > 0 && file.exists(mq_path)) {
+              shared$multiqc_report <- mq_path
+            }
+
+            sm_path <- state$salmon_meta_path %||% ""
+            if (nchar(sm_path) > 0 && file.exists(sm_path)) {
+              shared$salmon_meta <- tryCatch(
+                jsonlite::fromJSON(sm_path),
+                error = function(e) NULL
+              )
+            }
+          }
+        }
+      }
+
+      # Catch unexpected process death
+      if (!is.null(rv$proc) && !rv$proc$is_alive() && rv$running) {
+        rv$running              <- FALSE
         shared$pipeline_running <- FALSE
+        add_log("Pipeline terminado inesperadamente — revisa los logs", "warn")
       }
     })
 
-    # ── Main pipeline execution ────────────────────────────
+    # ── Cancel button ──────────────────────────────────────
+    observeEvent(input$cancel_btn, {
+      if (rv$running) {
+        if (!is.null(rv$proc) && rv$proc$is_alive()) rv$proc$kill()
+        rv$running              <- FALSE
+        shared$pipeline_running <- FALSE
+        add_log("Pipeline cancelado por el usuario", "warn")
+      }
+    })
+
+    # ── Run button ─────────────────────────────────────────
     observeEvent(input$run_btn, {
-      # Validate prerequisites
       samples <- shared$samples
       if (is.null(samples) || nrow(samples) == 0) {
         add_log("Error: no hay muestras cargadas. Ve a la pestaña Muestras.", "error")
         return()
       }
-
-      if (shared$build_new_index && (is.null(shared$transcriptome_fasta) || length(shared$transcriptome_fasta) == 0)) {
+      if (shared$build_new_index &&
+          (is.null(shared$transcriptome_fasta) || length(shared$transcriptome_fasta) == 0)) {
         add_log("Error: no se ha seleccionado un transcriptoma FASTA. Ve a la pestaña Referencias.", "error")
         return()
       }
-
       if (is.null(shared$gtf_path) || length(shared$gtf_path) == 0) {
         add_log("Error: no se ha seleccionado un archivo GTF. Ve a la pestaña Referencias.", "error")
         return()
       }
 
-      # Reset state
-      rv$log_lines     <- character(0)
-      rv$current_step  <- 0
-      rv$cancel_flag   <- FALSE
-      rv$running       <- TRUE
+      # IPC file paths
+      run_id     <- format(Sys.time(), "%Y%m%d_%H%M%S")
+      tmp_dir    <- "/data/tmp"
+      dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
+      log_file   <- file.path(tmp_dir, paste0("sf_log_",    run_id, ".txt"))
+      state_file <- file.path(tmp_dir, paste0("sf_state_",  run_id, ".json"))
+      params_file <- file.path(tmp_dir, paste0("sf_params_", run_id, ".json"))
+
+      # Serialize all params for the background script
+      params <- list(
+        samples               = samples,
+        lib_type_se           = isTRUE(shared$lib_type_se),
+        trimming_enabled      = isTRUE(shared$trimming_enabled),
+        fastp_cut_front       = shared$fastp_cut_front,
+        fastp_cut_tail        = shared$fastp_cut_tail,
+        fastp_cut_right       = shared$fastp_cut_right,
+        fastp_minlen          = shared$fastp_minlen,
+        adapter_fasta         = shared$adapter_fasta %||% "",
+        transcriptome_fasta   = shared$transcriptome_fasta %||% "",
+        gtf_path              = shared$gtf_path %||% "",
+        salmon_index_dir      = shared$salmon_index_dir %||% "",
+        build_new_index       = isTRUE(shared$build_new_index),
+        decoy_aware           = isTRUE(shared$decoy_aware),
+        genome_fasta          = shared$genome_fasta %||% "",
+        kmer_size             = shared$kmer_size,
+        salmon_libtype        = shared$salmon_libtype,
+        salmon_gcbias         = isTRUE(shared$salmon_gcbias),
+        salmon_seqbias        = isTRUE(shared$salmon_seqbias),
+        salmon_threads        = shared$salmon_threads,
+        salmon_validate       = isTRUE(shared$salmon_validate),
+        salmon_bootstraps     = shared$salmon_bootstraps,
+        salmon_min_score_frac = shared$salmon_min_score_frac,
+        salmon_discard_orphans = isTRUE(shared$salmon_discard_orphans),
+        txi_method            = shared$txi_method,
+        txi_ignore_version    = isTRUE(shared$txi_ignore_version),
+        output_dir            = shared$output_dir
+      )
+      jsonlite::write_json(params, params_file, auto_unbox = TRUE)
+
+      # Reset UI state
+      rv$log_lines    <- character(0)
+      rv$log_pos      <- 0L
+      rv$current_step <- 0
+      rv$sample_status <- setNames(
+        as.list(rep("pending", nrow(samples))), samples$name
+      )
+      rv$log_file   <- log_file
+      rv$state_file <- state_file
+      rv$running    <- TRUE
       shared$pipeline_running <- TRUE
 
-      is_se       <- shared$lib_type_se
-      mode        <- if (is_se) "SE" else "PE"
-      threads     <- as.character(shared$salmon_threads)
-      output_dir  <- shared$output_dir
-      trim_dir    <- file.path(output_dir, "trimmed")
-      fastqc_dir  <- file.path(output_dir, "fastqc_pre")
-      quant_dir   <- file.path(output_dir, "salmon_quant")
-      multiqc_dir <- file.path(output_dir, "multiqc")
-      index_dir   <- if (shared$build_new_index) file.path("/data/references", "salmon_index") else shared$salmon_index_dir
+      # Launch background Rscript
+      script_path <- normalizePath("R/run_pipeline.R", mustWork = FALSE)
+      stderr_file <- file.path(tmp_dir, paste0("sf_stderr_", run_id, ".txt"))
 
-      # Initialize sample statuses
-      sample_names <- samples$name
-      ss <- setNames(rep("pending", length(sample_names)), sample_names)
-      rv$sample_status <- as.list(ss)
-
-      # Calculate total steps
-      n_samples <- nrow(samples)
-      total <- 1  # FastQC
-      if (shared$trimming_enabled) total <- total + n_samples  # fastp per sample
-      if (shared$build_new_index)  total <- total + 1          # Salmon index
-      total <- total + n_samples  # Salmon quant per sample
-      total <- total + 1          # tximport
-      total <- total + 1          # MultiQC
-      rv$total_steps <- total
-
-      add_log("=== Pipeline SalmonFlow iniciado ===", "info")
-      add_log(paste("Muestras:", n_samples, "| Modo:", mode), "info")
-
-      # ── STEP 1: FastQC ────────────────────────────────
-      add_log("── Paso 1: FastQC (pre-trimming) ──", "info")
-      all_fastqs <- samples$r1
-      if (!is_se) all_fastqs <- c(all_fastqs, samples$r2)
-      all_fastqs <- all_fastqs[!is.na(all_fastqs)]
-
-      run_fastqc(all_fastqs, fastqc_dir,
-                 threads = shared$salmon_threads,
-                 log_callback = add_log)
-      rv$current_step <- rv$current_step + 1
-      if (rv$cancel_flag) return()
-
-      # ── STEP 2: Trimmomatic ───────────────────────────
-      trimmed_samples <- samples  # will update r1/r2 if trimming
-      if (shared$trimming_enabled) {
-        add_log("── Paso 2: fastp ──", "info")
-
-        for (i in seq_len(nrow(samples))) {
-          if (rv$cancel_flag) return()
-          sname <- samples$name[i]
-          rv$sample_status[[sname]] <- "running"
-
-          r2_val <- if (is_se) NULL else samples$r2[i]
-
-          trim_result <- run_fastp(
-            r1                = samples$r1[i],
-            r2                = r2_val,
-            out_dir           = trim_dir,
-            sample_name       = sname,
-            mode              = mode,
-            adapter_fasta     = shared$adapter_fasta,
-            cut_front_quality = shared$fastp_cut_front,
-            cut_tail_quality  = shared$fastp_cut_tail,
-            cut_right_quality = shared$fastp_cut_right,
-            minlen            = shared$fastp_minlen,
-            threads           = shared$salmon_threads,
-            log_callback      = add_log
-          )
-
-          if (trim_result$exit_status == 0) {
-            trimmed_samples$r1[i] <- trim_result$r1_trimmed
-            if (!is_se) trimmed_samples$r2[i] <- trim_result$r2_trimmed
-            rv$sample_status[[sname]] <- "done"
-          } else {
-            rv$sample_status[[sname]] <- "error"
-          }
-
-          rv$current_step <- rv$current_step + 1
-        }
-
-        # Reset statuses for Salmon quant
-        for (s in sample_names) {
-          if (rv$sample_status[[s]] == "done") rv$sample_status[[s]] <- "pending"
-        }
-      } else {
-        add_log("── Paso 2: fastp (omitido) ──", "info")
-      }
-
-      # ── STEP 3: Salmon Index ──────────────────────────
-      if (shared$build_new_index) {
-        add_log("── Paso 3: Construcción del índice Salmon ──", "info")
-        if (rv$cancel_flag) return()
-
-        decoy_file <- if (shared$decoy_aware) shared$genome_fasta else NULL
-
-        idx_result <- build_salmon_index(
-          fasta      = as.character(shared$transcriptome_fasta),
-          outdir     = index_dir,
-          decoy      = decoy_file,
-          kmer       = shared$kmer_size,
-          threads    = shared$salmon_threads,
-          log_callback = add_log
-        )
-        rv$current_step <- rv$current_step + 1
-
-        if (idx_result$exit_status != 0) {
-          add_log("Pipeline abortado: error al construir el índice", "error")
-          rv$running <- FALSE
-          shared$pipeline_running <- FALSE
-          return()
-        }
-        index_dir <- idx_result$index_dir
-      } else {
-        add_log("── Paso 3: Índice Salmon (usando existente) ──", "info")
-        index_dir <- as.character(shared$salmon_index_dir)
-      }
-
-      # ── STEP 4: Salmon Quant ──────────────────────────
-      add_log("── Paso 4: Cuantificación Salmon ──", "info")
-      salmon_metas <- list()
-
-      for (i in seq_len(nrow(trimmed_samples))) {
-        if (rv$cancel_flag) return()
-        sname <- trimmed_samples$name[i]
-        rv$sample_status[[sname]] <- "running"
-
-        r2_val <- if (is_se) NULL else trimmed_samples$r2[i]
-
-        quant_result <- run_salmon_quant(
-          index_dir      = index_dir,
-          r1             = trimmed_samples$r1[i],
-          r2             = r2_val,
-          outdir         = quant_dir,
-          sample_name    = sname,
-          lib_type       = shared$salmon_libtype,
-          gc_bias        = shared$salmon_gcbias,
-          seq_bias       = shared$salmon_seqbias,
-          threads        = shared$salmon_threads,
-          is_se          = is_se,
-          validate       = shared$salmon_validate,
-          bootstraps     = shared$salmon_bootstraps,
-          min_score_frac = shared$salmon_min_score_frac,
-          discard_orphans = shared$salmon_discard_orphans,
-          log_callback   = add_log
-        )
-
-        if (quant_result$exit_status == 0) {
-          rv$sample_status[[sname]] <- "done"
-          salmon_metas[[sname]] <- quant_result$meta
-        } else {
-          rv$sample_status[[sname]] <- "error"
-        }
-
-        rv$current_step <- rv$current_step + 1
-        add_log(paste("  Salmon quant:", i, "/", nrow(trimmed_samples)), "info")
-      }
-
-      shared$salmon_meta <- salmon_metas
-
-      # ── STEP 5: tximport ──────────────────────────────
-      add_log("── Paso 5: tximport ──", "info")
-      if (rv$cancel_flag) return()
-
-      tx2gene <- build_tx2gene(as.character(shared$gtf_path), log_callback = add_log)
-      if (is.null(tx2gene)) {
-        add_log("Pipeline abortado: error al construir tx2gene", "error")
-        rv$running <- FALSE
-        shared$pipeline_running <- FALSE
-        return()
-      }
-
-      count_matrix <- run_tximport(
-        quant_dir          = quant_dir,
-        sample_names       = sample_names,
-        tx2gene            = tx2gene,
-        method             = shared$txi_method,
-        ignore_tx_version  = shared$txi_ignore_version,
-        output_dir         = output_dir,
-        log_callback       = add_log
+      rv$proc <- processx::process$new(
+        "Rscript",
+        args   = c(script_path, params_file, log_file, state_file),
+        stdout = NULL,
+        stderr = stderr_file
       )
 
-      rv$current_step <- rv$current_step + 1
-      shared$count_matrix <- count_matrix
-
-      # ── STEP 6: MultiQC ──────────────────────────────
-      add_log("── Paso 6: MultiQC ──", "info")
-      if (rv$cancel_flag) return()
-
-      mqc <- run_multiqc(output_dir, multiqc_dir, log_callback = add_log)
-      rv$current_step <- rv$current_step + 1
-
-      if (file.exists(mqc$report_path)) {
-        shared$multiqc_report <- mqc$report_path
-      }
-
-      # ── Done ──────────────────────────────────────────
-      add_log("=== Pipeline completado exitosamente ===", "success")
-      rv$running <- FALSE
-      shared$pipeline_running <- FALSE
+      add_log(paste("Pipeline iniciado (PID:", rv$proc$get_pid(), ")"), "info")
     })
   })
 }
