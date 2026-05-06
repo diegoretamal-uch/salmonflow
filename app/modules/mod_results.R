@@ -10,7 +10,7 @@ mod_results_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "📊 Matriz de Conteos (lengthScaledTPM)",
+          title = "Matriz de Conteos (lengthScaledTPM)",
           status = "primary", solidHeader = FALSE, width = 12,
           collapsible = TRUE,
 
@@ -20,11 +20,11 @@ mod_results_ui <- function(id) {
 
           fluidRow(
             column(3,
-              downloadButton(ns("download_csv"), "📥 Descargar CSV",
+              downloadButton(ns("download_csv"), "Descargar CSV",
                              class = "btn-success")
             ),
             column(3,
-              downloadButton(ns("download_tsv"), "📥 Descargar TSV",
+              downloadButton(ns("download_tsv"), "Descargar TSV",
                              class = "btn-success")
             )
           )
@@ -35,14 +35,14 @@ mod_results_ui <- function(id) {
     fluidRow(
       column(6,
         box(
-          title = "🐟 Salmon QC — Mapping Rates",
+          title = "Salmon QC — Mapping Rates",
           status = "primary", solidHeader = FALSE, width = 12,
           DTOutput(ns("salmon_qc_table"))
         )
       ),
       column(6,
         box(
-          title = "📋 MultiQC Report",
+          title = "MultiQC Report",
           status = "primary", solidHeader = FALSE, width = 12,
           uiOutput(ns("multiqc_link")),
           helpText("El reporte MultiQC se abrirá en una nueva pestaña del navegador.")
@@ -53,14 +53,14 @@ mod_results_ui <- function(id) {
     fluidRow(
       column(6,
         box(
-          title = "🔬 PCA — Top Variable Genes",
+          title = "PCA — Top Variable Genes",
           status = "primary", solidHeader = FALSE, width = 12,
           plotlyOutput(ns("pca_plot"), height = "450px")
         )
       ),
       column(6,
         box(
-          title = "🔥 Heatmap — Top 50 Genes Más Variables",
+          title = "Heatmap — Top 50 Genes Más Variables",
           status = "primary", solidHeader = FALSE, width = 12,
           plotOutput(ns("heatmap_plot"), height = "500px")
         )
@@ -136,7 +136,7 @@ mod_results_server <- function(id, shared) {
     output$multiqc_link <- renderUI({
       rpt <- shared$multiqc_report
       if (is.null(rpt) || !file.exists(rpt)) {
-        tags$p(style = "color:#8a8fa0;", "No hay reporte MultiQC disponible aún.")
+        tags$p(style = "color:#5a6373;", "No hay reporte MultiQC disponible aún.")
       } else {
         # Serve via Shiny addResourcePath
         addResourcePath("multiqc", dirname(rpt))
@@ -196,21 +196,21 @@ mod_results_server <- function(id, shared) {
         ) +
         theme_minimal(base_size = 13) +
         theme(
-          plot.background  = element_rect(fill = "#1a1d27", color = NA),
-          panel.background = element_rect(fill = "#1a1d27", color = NA),
-          panel.grid       = element_line(color = "#2d3140"),
-          text             = element_text(color = "#e0e0e0"),
-          axis.text        = element_text(color = "#8a8fa0"),
-          legend.background = element_rect(fill = "#1a1d27"),
-          legend.text       = element_text(color = "#e0e0e0")
+          plot.background  = element_rect(fill = "#ffffff", color = NA),
+          panel.background = element_rect(fill = "#ffffff", color = NA),
+          panel.grid       = element_line(color = "#e0e4ec"),
+          text             = element_text(color = "#1f2430"),
+          axis.text        = element_text(color = "#5a6373"),
+          legend.background = element_rect(fill = "#ffffff"),
+          legend.text       = element_text(color = "#1f2430")
         ) +
         scale_color_brewer(palette = "Set2")
 
       ggplotly(p, tooltip = c("text", "Group")) %>%
         layout(
-          paper_bgcolor = "#1a1d27",
-          plot_bgcolor  = "#1a1d27",
-          font = list(color = "#e0e0e0")
+          paper_bgcolor = "#ffffff",
+          plot_bgcolor  = "#ffffff",
+          font = list(color = "#1f2430")
         )
     })
 
@@ -244,7 +244,7 @@ mod_results_server <- function(id, shared) {
       }
 
       pheatmap(mat_top,
-        color          = colorRampPalette(c("#0d47a1", "#1a1d27", "#ff6f00"))(100),
+        color          = colorRampPalette(c("#0277bd", "#ffffff", "#ef6c00"))(100),
         border_color   = NA,
         fontsize_row   = 7,
         fontsize_col   = 10,
@@ -252,6 +252,6 @@ mod_results_server <- function(id, shared) {
         main           = "Top 50 — Genes Más Variables",
         clustering_method = "ward.D2"
       )
-    }, bg = "#1a1d27")
+    }, bg = "#ffffff")
   })
 }

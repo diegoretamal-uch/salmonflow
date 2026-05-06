@@ -12,13 +12,13 @@ validate_fastq_files <- function(paths) {
 
   for (p in paths) {
     if (!file.exists(p)) {
-      msgs <- c(msgs, paste0("✗ Not found: ", basename(p)))
+      msgs <- c(msgs, paste0("[ERROR] Not found: ", basename(p)))
       valid <- FALSE
     } else if (!grepl("\\.(fastq|fq)(\\.gz)?$", p, ignore.case = TRUE)) {
-      msgs <- c(msgs, paste0("⚠ Not a FASTQ file: ", basename(p)))
+      msgs <- c(msgs, paste0("[WARN] Not a FASTQ file: ", basename(p)))
       valid <- FALSE
     } else {
-      msgs <- c(msgs, paste0("✓ ", basename(p)))
+      msgs <- c(msgs, paste0("[OK] ", basename(p)))
     }
   }
 

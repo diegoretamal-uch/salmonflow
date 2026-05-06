@@ -10,20 +10,20 @@ mod_references_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "🧬 Archivos de Referencia",
+          title = "Archivos de Referencia",
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
             column(6,
               tags$label("Transcriptoma FASTA"),
-              shinyFilesButton(ns("fasta_file"), "📂 Seleccionar",
+              shinyFilesButton(ns("fasta_file"), "Seleccionar",
                                title = "Seleccionar archivo FASTA del transcriptoma",
                                multiple = FALSE),
               textOutput(ns("fasta_status"))
             ),
             column(6,
               tags$label("Anotación GTF"),
-              shinyFilesButton(ns("gtf_file"), "📂 Seleccionar",
+              shinyFilesButton(ns("gtf_file"), "Seleccionar",
                                title = "Seleccionar archivo GTF de anotación",
                                multiple = FALSE),
               textOutput(ns("gtf_status"))
@@ -35,7 +35,7 @@ mod_references_ui <- function(id) {
           fluidRow(
             column(6,
               tags$label("Adaptadores FASTA (fastp, opcional)"),
-              shinyFilesButton(ns("adapter_file"), "📂 Seleccionar",
+              shinyFilesButton(ns("adapter_file"), "Seleccionar",
                                title = "Seleccionar FASTA de adaptadores",
                                multiple = FALSE),
               textOutput(ns("adapter_status")),
@@ -56,7 +56,7 @@ mod_references_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "🐟 Índice Salmon",
+          title = "Índice Salmon",
           status = "primary", solidHeader = FALSE, width = 12,
 
           radioButtons(ns("index_mode"), "Modo de índice",
@@ -66,7 +66,7 @@ mod_references_ui <- function(id) {
 
           conditionalPanel(
             condition = paste0("input['", ns("index_mode"), "'] == 'existing'"),
-            shinyDirButton(ns("index_dir"), "📂 Seleccionar directorio del índice",
+            shinyDirButton(ns("index_dir"), "Seleccionar directorio del índice",
                            title = "Directorio del índice Salmon existente"),
             textOutput(ns("index_dir_status"))
           ),
@@ -81,7 +81,7 @@ mod_references_ui <- function(id) {
             column(4,
               conditionalPanel(
                 condition = paste0("input['", ns("decoy_aware"), "']"),
-                shinyFilesButton(ns("genome_file"), "📂 Genoma FASTA",
+                shinyFilesButton(ns("genome_file"), "Genoma FASTA",
                                  title = "Seleccionar genoma FASTA para decoys",
                                  multiple = FALSE),
                 textOutput(ns("genome_status"))
@@ -129,25 +129,25 @@ mod_references_server <- function(id, shared, volumes) {
     output$fasta_status <- renderText({
       p <- parse_file(input$fasta_file)
       if (is.null(p) || length(p) == 0) "No seleccionado"
-      else paste("✓", basename(p))
+      else paste("Seleccionado:", basename(p))
     })
 
     output$gtf_status <- renderText({
       p <- parse_file(input$gtf_file)
       if (is.null(p) || length(p) == 0) "No seleccionado"
-      else paste("✓", basename(p))
+      else paste("Seleccionado:", basename(p))
     })
 
     output$adapter_status <- renderText({
       p <- parse_file(input$adapter_file)
       if (is.null(p) || length(p) == 0) "Usando adaptadores por defecto"
-      else paste("✓", basename(p))
+      else paste("Seleccionado:", basename(p))
     })
 
     output$genome_status <- renderText({
       p <- parse_file(input$genome_file)
       if (is.null(p) || length(p) == 0) "No seleccionado"
-      else paste("✓", basename(p))
+      else paste("Seleccionado:", basename(p))
     })
 
     output$index_dir_status <- renderText({
@@ -156,8 +156,8 @@ mod_references_server <- function(id, shared, volumes) {
       else {
         # Check if it looks like a valid Salmon index
         has_info <- file.exists(file.path(p, "info.json"))
-        if (has_info) paste("✓ Índice válido:", basename(p))
-        else paste("⚠ Directorio seleccionado (no se encontró info.json):", basename(p))
+        if (has_info) paste("Índice válido:", basename(p))
+        else paste("Directorio seleccionado (no se encontró info.json):", basename(p))
       }
     })
 

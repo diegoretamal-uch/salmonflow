@@ -16,7 +16,7 @@ build_tx2gene <- function(gtf_path, log_callback = NULL) {
   })
 
   txdb <- tryCatch(
-    txdbmaker::makeTxDbFromGFF(gtf_path, format = "GTF"),
+    txdbmaker::makeTxDbFromGFF(gtf_path, format = "auto"),
     error = function(e) {
       if (!is.null(log_callback)) log_callback(paste("tx2gene error:", e$message), "error")
       return(NULL)
@@ -33,10 +33,14 @@ build_tx2gene <- function(gtf_path, log_callback = NULL) {
   tx2gene <- tx2gene[, c("TXNAME", "GENEID")]
   tx2gene <- tx2gene[complete.cases(tx2gene), ]
 
+  # Strip version suffix from transcript IDs (e.g. ENST00000832824.1 -> ENST00000832824)
+  # to match index FASTAs that lack version numbers
+  tx2gene$TXNAME <- sub("\\.[0-9]+$", "", tx2gene$TXNAME)
+
   if (!is.null(log_callback)) {
     log_callback(
       paste("tx2gene: mapped", nrow(tx2gene), "transcripts to",
-            length(unique(tx2gene$GENEID)), "genes ✓"),
+            length(unique(tx2gene$GENEID)), "genes"),
       "success"
     )
   }
@@ -104,8 +108,8 @@ run_tximport <- function(quant_dir, sample_names, tx2gene,
 
   if (!is.null(log_callback)) {
     log_callback(
-      paste0("tximport: merged matrix — ", nrow(count_matrix), " genes × ",
-             length(sample_names), " samples ✓"),
+      paste0("tximport: merged matrix — ", nrow(count_matrix), " genes x ",
+             length(sample_names), " samples"),
       "success"
     )
   }

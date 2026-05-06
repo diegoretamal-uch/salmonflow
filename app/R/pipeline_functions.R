@@ -18,10 +18,10 @@ run_fastqc <- function(files, outdir, threads = 4, log_callback = NULL) {
 
   result <- tryCatch(
     processx::run("fastqc", args = args, echo = FALSE,
-                  stdout_line_callback = function(line) {
+                  stdout_line_callback = function(line, proc) {
                     if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
                   },
-                  stderr_line_callback = function(line) {
+                  stderr_line_callback = function(line, proc) {
                     if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
                   }),
     error = function(e) list(status = 1, stderr = conditionMessage(e))
@@ -29,7 +29,7 @@ run_fastqc <- function(files, outdir, threads = 4, log_callback = NULL) {
 
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
-      log_callback("FastQC: completed ✓", "success")
+      log_callback("FastQC: completed", "success")
     } else {
       log_callback(paste("FastQC: error —", result$stderr %||% "unknown"), "error")
     }
@@ -92,7 +92,7 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
 
   result <- tryCatch(
     processx::run("fastp", args = args, echo = FALSE,
-                  stderr_line_callback = function(line) {
+                  stderr_line_callback = function(line, proc) {
                     if (!is.null(log_callback)) log_callback(paste("fastp:", line), "info")
                   }),
     error = function(e) list(status = 1, stderr = conditionMessage(e))
@@ -100,7 +100,7 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
 
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
-      log_callback(paste("fastp:", sample_name, "✓"), "success")
+      log_callback(paste("fastp:", sample_name, "done"), "success")
     } else {
       log_callback(paste("fastp:", sample_name, "error —", result$stderr %||% "unknown"), "error")
     }
@@ -141,7 +141,7 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
 
   result <- tryCatch(
     processx::run("salmon", args = args, echo = FALSE,
-                  stderr_line_callback = function(line) {
+                  stderr_line_callback = function(line, proc) {
                     if (!is.null(log_callback)) log_callback(paste("Salmon index:", line), "info")
                   }),
     error = function(e) list(status = 1, stderr = conditionMessage(e))
@@ -149,7 +149,7 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
 
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
-      log_callback("Salmon index: completed ✓", "success")
+      log_callback("Salmon index: completed", "success")
     } else {
       log_callback(paste("Salmon index: error —", result$stderr %||% "unknown"), "error")
     }
@@ -174,6 +174,8 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
 run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
                              lib_type = "A", gc_bias = TRUE, seq_bias = TRUE,
                              threads = 4, is_se = FALSE,
+                             validate = TRUE, bootstraps = 0,
+                             min_score_frac = 0.65, discard_orphans = FALSE,
                              log_callback = NULL) {
 
   sample_out <- file.path(outdir, sample_name)
@@ -185,7 +187,7 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
             "-i", index_dir,
             "-l", lib_type,
             "-p", as.character(threads),
-            "--validateMappings",
+            "--minScoreFraction", as.character(min_score_frac),
             "-o", sample_out)
 
   if (is_se) {
@@ -194,12 +196,15 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
     args <- c(args, "-1", r1, "-2", r2)
   }
 
-  if (gc_bias)  args <- c(args, "--gcBias")
-  if (seq_bias) args <- c(args, "--seqBias")
+  if (validate)        args <- c(args, "--validateMappings")
+  if (gc_bias)         args <- c(args, "--gcBias")
+  if (seq_bias)        args <- c(args, "--seqBias")
+  if (bootstraps > 0)  args <- c(args, "--numBootstraps", as.character(bootstraps))
+  if (discard_orphans) args <- c(args, "--discardOrphansQuasi")
 
   result <- tryCatch(
     processx::run("salmon", args = args, echo = FALSE,
-                  stderr_line_callback = function(line) {
+                  stderr_line_callback = function(line, proc) {
                     if (!is.null(log_callback)) log_callback(paste("Salmon quant:", line), "info")
                   }),
     error = function(e) list(status = 1, stderr = conditionMessage(e))
@@ -211,9 +216,9 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
       rate_msg <- if (!is.na(meta$percent_mapped)) paste0("mapping ", meta$percent_mapped, "%") else ""
-      log_callback(paste("Salmon quant:", sample_name, "✓", rate_msg), "success")
+      log_callback(paste("Salmon quant:", sample_name, "done", rate_msg), "success")
       if (!is.na(meta$percent_mapped) && meta$percent_mapped < 50) {
-        log_callback(paste("⚠ Warning:", sample_name, "mapping rate below 50%!"), "warn")
+        log_callback(paste("Warning:", sample_name, "mapping rate below 50%!"), "warn")
       }
     } else {
       log_callback(paste("Salmon quant:", sample_name, "error —", result$stderr %||% "unknown"), "error")
@@ -244,7 +249,7 @@ run_multiqc <- function(input_dir, outdir, log_callback = NULL) {
 
   result <- tryCatch(
     processx::run("multiqc", args = args, echo = FALSE,
-                  stderr_line_callback = function(line) {
+                  stderr_line_callback = function(line, proc) {
                     if (!is.null(log_callback)) log_callback(paste("MultiQC:", line), "info")
                   }),
     error = function(e) list(status = 1, stderr = conditionMessage(e))
@@ -254,7 +259,7 @@ run_multiqc <- function(input_dir, outdir, log_callback = NULL) {
 
   if (!is.null(log_callback)) {
     if (file.exists(report_path)) {
-      log_callback("MultiQC: report generated ✓", "success")
+      log_callback("MultiQC: report generated", "success")
     } else {
       log_callback("MultiQC: report generation may have failed", "warn")
     }

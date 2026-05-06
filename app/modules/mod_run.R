@@ -10,7 +10,7 @@ mod_run_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "📋 Resumen de configuración",
+          title = "Resumen de configuración",
           status = "primary", solidHeader = FALSE, width = 12,
           collapsible = TRUE,
           uiOutput(ns("config_summary"))
@@ -21,17 +21,17 @@ mod_run_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "▶️ Ejecución del Pipeline",
+          title = "Ejecución del Pipeline",
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
             column(4,
-              actionButton(ns("run_btn"), "▶ Iniciar análisis",
+              actionButton(ns("run_btn"), "Iniciar análisis",
                            class = "btn-primary", icon = icon("play"),
                            style = "width:100%; font-size:16px; padding:14px;")
             ),
             column(4,
-              actionButton(ns("cancel_btn"), "⏹ Cancelar",
+              actionButton(ns("cancel_btn"), "Cancelar",
                            class = "btn-danger", icon = icon("stop"),
                            style = "width:100%; font-size:16px; padding:14px;")
             ),
@@ -134,18 +134,18 @@ mod_run_server <- function(id, shared) {
     # ── Pipeline status badge ──────────────────────────────
     output$pipeline_status_badge <- renderUI({
       if (rv$running) {
-        tags$span(class = "badge-running", "⏳ Pipeline en ejecución")
+        tags$span(class = "badge-running", "Pipeline en ejecución")
       } else if (rv$current_step >= rv$total_steps && rv$current_step > 0) {
-        tags$span(class = "badge-success", "✓ Pipeline completado")
+        tags$span(class = "badge-success", "Pipeline completado")
       } else {
-        tags$span(style = "color:#8a8fa0;", "Listo para ejecutar")
+        tags$span(style = "color:#5a6373;", "Listo para ejecutar")
       }
     })
 
     # ── Per-sample status ──────────────────────────────────
     output$sample_status_list <- renderUI({
       statuses <- rv$sample_status
-      if (length(statuses) == 0) return(tags$p(style="color:#8a8fa0;", "—"))
+      if (length(statuses) == 0) return(tags$p(style="color:#5a6373;", "—"))
 
       tags$div(
         lapply(names(statuses), function(s) {
@@ -156,14 +156,8 @@ mod_run_server <- function(id, shared) {
             error   = "badge-error",
             "badge-default"
           )
-          icon_txt <- switch(st,
-            done    = "✓",
-            running = "⏳",
-            error   = "✗",
-            "○"
-          )
           tags$span(style = "margin-right:12px;",
-            tags$span(class = badge_class, paste(icon_txt, s))
+            tags$span(class = badge_class, s)
           )
         })
       )
@@ -173,7 +167,7 @@ mod_run_server <- function(id, shared) {
     observeEvent(input$cancel_btn, {
       if (rv$running) {
         rv$cancel_flag <- TRUE
-        add_log("⏹ Pipeline cancelado por el usuario", "warn")
+        add_log("Pipeline cancelado por el usuario", "warn")
         rv$running <- FALSE
         shared$pipeline_running <- FALSE
       }
@@ -230,7 +224,7 @@ mod_run_server <- function(id, shared) {
       total <- total + 1          # MultiQC
       rv$total_steps <- total
 
-      add_log("═══ Pipeline SalmonFlow iniciado ═══", "info")
+      add_log("=== Pipeline SalmonFlow iniciado ===", "info")
       add_log(paste("Muestras:", n_samples, "| Modo:", mode), "info")
 
       # ── STEP 1: FastQC ────────────────────────────────
@@ -332,17 +326,21 @@ mod_run_server <- function(id, shared) {
         r2_val <- if (is_se) NULL else trimmed_samples$r2[i]
 
         quant_result <- run_salmon_quant(
-          index_dir   = index_dir,
-          r1          = trimmed_samples$r1[i],
-          r2          = r2_val,
-          outdir      = quant_dir,
-          sample_name = sname,
-          lib_type    = shared$salmon_libtype,
-          gc_bias     = shared$salmon_gcbias,
-          seq_bias    = shared$salmon_seqbias,
-          threads     = shared$salmon_threads,
-          is_se       = is_se,
-          log_callback = add_log
+          index_dir      = index_dir,
+          r1             = trimmed_samples$r1[i],
+          r2             = r2_val,
+          outdir         = quant_dir,
+          sample_name    = sname,
+          lib_type       = shared$salmon_libtype,
+          gc_bias        = shared$salmon_gcbias,
+          seq_bias       = shared$salmon_seqbias,
+          threads        = shared$salmon_threads,
+          is_se          = is_se,
+          validate       = shared$salmon_validate,
+          bootstraps     = shared$salmon_bootstraps,
+          min_score_frac = shared$salmon_min_score_frac,
+          discard_orphans = shared$salmon_discard_orphans,
+          log_callback   = add_log
         )
 
         if (quant_result$exit_status == 0) {
@@ -395,7 +393,7 @@ mod_run_server <- function(id, shared) {
       }
 
       # ── Done ──────────────────────────────────────────
-      add_log("═══ Pipeline completado exitosamente ═══", "success")
+      add_log("=== Pipeline completado exitosamente ===", "success")
       rv$running <- FALSE
       shared$pipeline_running <- FALSE
     })

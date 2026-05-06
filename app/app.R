@@ -46,10 +46,7 @@ ui <- dashboardPage(
   skin = "black",
 
   dashboardHeader(
-    title = span(
-      icon("fish"), "SalmonFlow",
-      style = "font-weight:700; letter-spacing:1px;"
-    ),
+    title = span("SalmonFlow", style = "font-weight:700; letter-spacing:1px;"),
     titleWidth = 260
   ),
 
@@ -112,10 +109,14 @@ server <- function(input, output, session) {
     fastp_cut_tail      = 3,
     fastp_cut_right     = 15,
     fastp_minlen        = 36,
-    salmon_libtype      = "A",
-    salmon_gcbias       = TRUE,
-    salmon_seqbias      = TRUE,
-    salmon_threads      = 4,
+    salmon_libtype          = "A",
+    salmon_gcbias           = TRUE,
+    salmon_seqbias          = TRUE,
+    salmon_threads          = 4,
+    salmon_validate         = TRUE,
+    salmon_bootstraps       = 0,
+    salmon_min_score_frac   = 0.65,
+    salmon_discard_orphans  = FALSE,
     txi_method          = "lengthScaledTPM",
     txi_ignore_version  = TRUE,
 

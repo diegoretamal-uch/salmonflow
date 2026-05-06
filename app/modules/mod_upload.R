@@ -10,7 +10,7 @@ mod_upload_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "📁 Carga de Muestras",
+          title = "Carga de Muestras",
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
@@ -20,7 +20,7 @@ mod_upload_ui <- function(id) {
                            selected = "PE", inline = TRUE)
             ),
             column(4,
-              shinyDirButton(ns("fastq_dir"), "📂 Seleccionar carpeta de FASTQs",
+              shinyDirButton(ns("fastq_dir"), "Seleccionar carpeta de FASTQs",
                              title = "Seleccionar carpeta con archivos FASTQ",
                              icon = icon("folder-open"))
             ),
@@ -47,11 +47,11 @@ mod_upload_ui <- function(id) {
                            class = "btn-default", icon = icon("minus"))
             ),
             column(3,
-              actionButton(ns("auto_detect"), "🔍 Auto-detectar pares",
-                           class = "btn-info")
+              actionButton(ns("auto_detect"), "Auto-detectar pares",
+                           class = "btn-info", icon = icon("search"))
             ),
             column(3,
-              actionButton(ns("validate_btn"), "✓ Validar muestras",
+              actionButton(ns("validate_btn"), "Validar muestras",
                            class = "btn-success", icon = icon("check"))
             )
           ),
@@ -163,7 +163,7 @@ mod_upload_server <- function(id, shared, volumes) {
       df <- rv$table_data
       if (nrow(df) == 0) {
         output$validation_msg <- renderUI(
-          tags$div(class = "validation-warn", "⚠ No hay muestras cargadas")
+          tags$div(class = "validation-warn", "No hay muestras cargadas")
         )
         return()
       }
@@ -180,20 +180,19 @@ mod_upload_server <- function(id, shared, volumes) {
 
       output$validation_msg <- renderUI({
         msgs <- lapply(result$messages, function(m) {
-          cls <- if (grepl("^✓", m)) "validation-ok"
-                 else if (grepl("^⚠", m)) "validation-warn"
+          cls <- if (grepl("^\\[OK\\]", m)) "validation-ok"
                  else "validation-warn"
           tags$div(class = cls, m)
         })
         if (result$valid) {
           tagList(
             tags$div(class = "validation-ok",
-                     paste("✓ Todas las", nrow(df), "muestras validadas correctamente")),
+                     paste("Todas las", nrow(df), "muestras validadas correctamente")),
             msgs
           )
         } else {
           tagList(
-            tags$div(class = "validation-warn", "⚠ Algunos archivos tienen problemas:"),
+            tags$div(class = "validation-warn", "Algunos archivos tienen problemas:"),
             msgs
           )
         }
