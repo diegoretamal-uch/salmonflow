@@ -66,7 +66,28 @@ docker run --rm -p 3838:3838 \
 
 ---
 
-## Volume Mounts
+## Data Folders
+
+No manual setup required. The `data/` folder comes pre-created when you clone the repo:
+
+```
+salmonflow/
+├── data/
+│   ├── input/        ← drop your FASTQ files here
+│   ├── references/   ← transcriptome FASTA, GTF, Salmon index
+│   ├── output/       ← pipeline results written here
+│   └── tmp/          ← intermediate files (auto-cleaned)
+```
+
+By default the scripts use these folders. You can also pass **any absolute path** on your machine — the run scripts create the directories automatically if they don't exist:
+
+```bash
+# Linux/macOS — use external paths
+./run.sh /mnt/data/fastqs /mnt/refs /mnt/results
+
+# Windows — use external paths
+.\run.ps1 D:\data\fastqs D:\refs D:\results
+```
 
 | Container path      | Purpose                                        |
 |---------------------|------------------------------------------------|
