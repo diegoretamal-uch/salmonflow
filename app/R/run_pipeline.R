@@ -2,6 +2,10 @@
 # SalmonFlow — background pipeline runner
 # Args: <params_json> <log_file> <state_file>
 
+# When Shiny auto-sources R/ files on startup, sys.nframe() > 0 — bail out silently.
+# This script is only meant to be executed directly via Rscript.
+if (sys.nframe() > 0) return(invisible(NULL))
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 3) stop("Usage: run_pipeline.R <params_json> <log_file> <state_file>")
 
