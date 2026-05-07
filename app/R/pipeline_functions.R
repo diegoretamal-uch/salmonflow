@@ -3,6 +3,20 @@
 # Wrappers for external bioinformatics tools via processx
 # ══════════════════════════════════════════════════════════════
 
+#' Detect GENCODE-format FASTA (headers use | as field separator)
+detect_gencode_fasta <- function(fasta_path) {
+  tryCatch({
+    first_line <- if (grepl("\\.gz$", fasta_path, ignore.case = TRUE)) {
+      con <- gzcon(file(fasta_path, "rb"))
+      on.exit(close(con))
+      readLines(con, n = 1, warn = FALSE)
+    } else {
+      readLines(fasta_path, n = 1, warn = FALSE)
+    }
+    grepl("^>.*\\|", first_line)
+  }, error = function(e) FALSE)
+}
+
 #' Run FastQC on a set of FASTQ files
 #' @param files Character vector of FASTQ file paths
 #' @param outdir Output directory for FastQC results
@@ -16,22 +30,20 @@ run_fastqc <- function(files, outdir, threads = 4, log_callback = NULL) {
 
   args <- c(files, "--outdir", outdir, "--threads", as.character(threads))
 
-  result <- tryCatch(
-    processx::run("fastqc", args = args, echo = FALSE,
-                  stdout_line_callback = function(line, proc) {
-                    if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
-                  },
-                  stderr_line_callback = function(line, proc) {
-                    if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
-                  }),
-    error = function(e) list(status = 1, stderr = conditionMessage(e))
-  )
+  result <- processx::run("fastqc", args = args, echo = FALSE,
+                          error_on_status = FALSE,
+                          stdout_line_callback = function(line, proc) {
+                            if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
+                          },
+                          stderr_line_callback = function(line, proc) {
+                            if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
+                          })
 
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
       log_callback("FastQC: completed", "success")
     } else {
-      log_callback(paste("FastQC: error —", result$stderr %||% "unknown"), "error")
+      log_callback(paste("FastQC: failed with exit code", result$status), "error")
     }
   }
 
@@ -90,19 +102,17 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
     args <- c(args, "--detect_adapter_for_pe")
   }
 
-  result <- tryCatch(
-    processx::run("fastp", args = args, echo = FALSE,
-                  stderr_line_callback = function(line, proc) {
-                    if (!is.null(log_callback)) log_callback(paste("fastp:", line), "info")
-                  }),
-    error = function(e) list(status = 1, stderr = conditionMessage(e))
-  )
+  result <- processx::run("fastp", args = args, echo = FALSE,
+                          error_on_status = FALSE,
+                          stderr_line_callback = function(line, proc) {
+                            if (!is.null(log_callback)) log_callback(paste("fastp:", line), "info")
+                          })
 
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
       log_callback(paste("fastp:", sample_name, "done"), "success")
     } else {
-      log_callback(paste("fastp:", sample_name, "error —", result$stderr %||% "unknown"), "error")
+      log_callback(paste("fastp:", sample_name, "failed with exit code", result$status), "error")
     }
   }
 
@@ -136,9 +146,9 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
   # ── Decoy-aware: build gentrome + decoys.txt automatically ──
   # Salmon requires -t <transcriptome+genome.fa> -d <decoy_names.txt>
   if (!is.null(decoy) && nchar(decoy) > 0 && file.exists(decoy)) {
-    prep_dir     <- file.path(dirname(outdir), "salmon_index_prep")
+    prep_dir      <- file.path(dirname(outdir), "salmon_index_prep")
     dir.create(prep_dir, showWarnings = FALSE, recursive = TRUE)
-    decoys_file  <- file.path(prep_dir, "decoys.txt")
+    decoys_file   <- file.path(prep_dir, "decoys.txt")
     gentrome_file <- file.path(prep_dir, "gentrome.fa")
 
     # 1. Extract sequence names from the genome FASTA header lines
@@ -149,10 +159,7 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
     } else {
       paste0("grep '^>' ", shQuote(decoy), " | cut -d' ' -f1 | sed 's/^>//'")
     }
-    names_res <- tryCatch(
-      processx::run("bash", args = c("-c", names_cmd)),
-      error = function(e) list(status = 1, stdout = "")
-    )
+    names_res <- processx::run("bash", args = c("-c", names_cmd), error_on_status = FALSE)
     if (!identical(names_res$status, 0L) && !identical(names_res$status, 0)) {
       if (!is.null(log_callback)) log_callback("Salmon index: failed to extract decoy names", "error")
       return(list(exit_status = 1, index_dir = outdir))
@@ -168,7 +175,6 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
     t_gz <- grepl("\\.gz$", fasta, ignore.case = TRUE)
 
     concat_cmd <- if (t_gz && g_gz) {
-      # Both gzipped — gzip files are concatenable; Salmon reads .gz
       gentrome_file <- paste0(gentrome_file, ".gz")
       paste0("cat ", shQuote(fasta), " ", shQuote(decoy), " > ", shQuote(gentrome_file))
     } else if (!t_gz && !g_gz) {
@@ -179,10 +185,7 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
       paste0("{ cat ",  shQuote(fasta), "; zcat ", shQuote(decoy), "; } > ", shQuote(gentrome_file))
     }
 
-    concat_res <- tryCatch(
-      processx::run("bash", args = c("-c", concat_cmd)),
-      error = function(e) list(status = 1, stderr = conditionMessage(e))
-    )
+    concat_res <- processx::run("bash", args = c("-c", concat_cmd), error_on_status = FALSE)
     if (!identical(concat_res$status, 0L) && !identical(concat_res$status, 0)) {
       if (!is.null(log_callback)) log_callback("Salmon index: failed to create gentrome", "error")
       return(list(exit_status = 1, index_dir = outdir))
@@ -193,7 +196,7 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
     d_arg <- decoys_file
   }
 
-  # ── Run salmon index ─────────────────────────────────────
+  # ── Run salmon index ──────────────────────────────────────
   args <- c("index",
             "-t", t_arg,
             "-i", outdir,
@@ -202,19 +205,26 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
 
   if (!is.null(d_arg)) args <- c(args, "-d", d_arg)
 
-  result <- tryCatch(
-    processx::run("salmon", args = args, echo = FALSE,
-                  stderr_line_callback = function(line, proc) {
-                    if (!is.null(log_callback)) log_callback(paste("Salmon index:", line), "info")
-                  }),
-    error = function(e) list(status = 1, stderr = conditionMessage(e))
-  )
+  # Auto-detect GENCODE format from the original transcriptome FASTA headers.
+  # GENCODE uses | as field separator; --gencode tells Salmon to use only the
+  # first field (ENST ID) as the transcript name instead of the full header.
+  if (detect_gencode_fasta(fasta)) {
+    args <- c(args, "--gencode")
+    if (!is.null(log_callback)) log_callback(
+      "Salmon index: GENCODE format detected — adding --gencode flag", "info")
+  }
+
+  result <- processx::run("salmon", args = args, echo = FALSE,
+                          error_on_status = FALSE,
+                          stderr_line_callback = function(line, proc) {
+                            if (!is.null(log_callback)) log_callback(paste("Salmon index:", line), "info")
+                          })
 
   if (!is.null(log_callback)) {
     if (identical(result$status, 0L) || identical(result$status, 0)) {
       log_callback("Salmon index: completed", "success")
     } else {
-      log_callback(paste("Salmon index: error —", result$stderr %||% "unknown"), "error")
+      log_callback(paste("Salmon index: failed with exit code", result$status), "error")
     }
   }
 
@@ -265,15 +275,12 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
   if (bootstraps > 0)  args <- c(args, "--numBootstraps", as.character(bootstraps))
   if (discard_orphans) args <- c(args, "--discardOrphansQuasi")
 
-  result <- tryCatch(
-    processx::run("salmon", args = args, echo = FALSE,
-                  stderr_line_callback = function(line, proc) {
-                    if (!is.null(log_callback)) log_callback(paste("Salmon quant:", line), "info")
-                  }),
-    error = function(e) list(status = 1, stderr = conditionMessage(e))
-  )
+  result <- processx::run("salmon", args = args, echo = FALSE,
+                          error_on_status = FALSE,
+                          stderr_line_callback = function(line, proc) {
+                            if (!is.null(log_callback)) log_callback(paste("Salmon quant:", line), "info")
+                          })
 
-  # Parse mapping rate
   meta <- parse_salmon_meta(sample_out)
 
   if (!is.null(log_callback)) {
@@ -284,7 +291,7 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
         log_callback(paste("Warning:", sample_name, "mapping rate below 50%!"), "warn")
       }
     } else {
-      log_callback(paste("Salmon quant:", sample_name, "error —", result$stderr %||% "unknown"), "error")
+      log_callback(paste("Salmon quant:", sample_name, "failed with exit code", result$status), "error")
     }
   }
 
@@ -310,13 +317,11 @@ run_multiqc <- function(input_dir, outdir, log_callback = NULL) {
             "--filename", "multiqc_report",
             "--force")
 
-  result <- tryCatch(
-    processx::run("multiqc", args = args, echo = FALSE,
-                  stderr_line_callback = function(line, proc) {
-                    if (!is.null(log_callback)) log_callback(paste("MultiQC:", line), "info")
-                  }),
-    error = function(e) list(status = 1, stderr = conditionMessage(e))
-  )
+  result <- processx::run("multiqc", args = args, echo = FALSE,
+                          error_on_status = FALSE,
+                          stderr_line_callback = function(line, proc) {
+                            if (!is.null(log_callback)) log_callback(paste("MultiQC:", line), "info")
+                          })
 
   report_path <- file.path(outdir, "multiqc_report.html")
 
