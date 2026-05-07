@@ -161,6 +161,7 @@ if (isTRUE(p$build_new_index)) {
     decoy        = decoy_file,
     kmer         = as.integer(p$kmer_size %||% 31L),
     threads      = threads,
+    sparse       = isTRUE(p$sparse_index),
     log_callback = write_log
   )
   step <- step + 1L

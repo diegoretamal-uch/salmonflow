@@ -99,6 +99,7 @@ server <- function(input, output, session) {
     salmon_index_dir    = NULL,
     build_new_index     = TRUE,
     decoy_aware         = FALSE,
+    sparse_index        = FALSE,
     genome_fasta        = NULL,
     kmer_size           = 31,
     organism            = "other",

@@ -290,6 +290,7 @@ mod_run_server <- function(id, shared) {
         salmon_index_dir      = shared$salmon_index_dir %||% "",
         build_new_index       = isTRUE(shared$build_new_index),
         decoy_aware           = isTRUE(shared$decoy_aware),
+        sparse_index          = isTRUE(shared$sparse_index),
         genome_fasta          = shared$genome_fasta %||% "",
         kmer_size             = shared$kmer_size,
         salmon_libtype        = shared$salmon_libtype,

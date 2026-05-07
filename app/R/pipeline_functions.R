@@ -133,7 +133,7 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
 #' @param log_callback Function(msg, type) for live logging
 #' @return List with exit_status and index_dir
 build_salmon_index <- function(fasta, outdir, decoy = NULL,
-                               kmer = 31, threads = 4,
+                               kmer = 31, threads = 4, sparse = FALSE,
                                log_callback = NULL) {
 
   dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
@@ -212,6 +212,12 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
     args <- c(args, "--gencode")
     if (!is.null(log_callback)) log_callback(
       "Salmon index: GENCODE format detected — adding --gencode flag", "info")
+  }
+
+  if (isTRUE(sparse)) {
+    args <- c(args, "--sparse")
+    if (!is.null(log_callback)) log_callback(
+      "Salmon index: sparse mode enabled — lower memory usage", "info")
   }
 
   result <- processx::run("salmon", args = args, echo = FALSE,

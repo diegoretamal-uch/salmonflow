@@ -90,7 +90,9 @@ mod_references_ui <- function(id) {
             column(4,
               selectInput(ns("kmer_size"), "k-mer size",
                           choices = c(21, 23, 25, 27, 29, 31),
-                          selected = 31)
+                          selected = 31),
+              checkboxInput(ns("sparse_index"), "Índice sparse (--sparse)", value = FALSE),
+              helpText("Reduce el uso de RAM durante la construcción del índice (~30-50%). Recomendado si el sistema tiene poca memoria.")
             )
           )
         )
@@ -169,6 +171,7 @@ mod_references_server <- function(id, shared, volumes) {
       shared$kmer_size           <- as.integer(input$kmer_size)
       shared$build_new_index     <- (input$index_mode == "build")
       shared$decoy_aware         <- input$decoy_aware
+      shared$sparse_index        <- input$sparse_index
 
       adapter <- parse_file(input$adapter_file)
       shared$adapter_fasta <- if (!is.null(adapter) && length(adapter) > 0) as.character(adapter) else NULL
