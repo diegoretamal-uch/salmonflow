@@ -129,10 +129,12 @@ server <- function(input, output, session) {
     pipeline_process = NULL,
 
     # Results
-    count_matrix    = NULL,
-    salmon_meta     = NULL,
-    multiqc_report  = NULL,
-    output_dir      = DATA_OUTPUT
+    count_matrix         = NULL,
+    salmon_meta          = NULL,
+    multiqc_report       = NULL,
+    multiqc_pre_report   = NULL,
+    multiqc_post_report  = NULL,
+    output_dir           = DATA_OUTPUT
   )
 
   # ── Call module servers ────────────────────────────────────

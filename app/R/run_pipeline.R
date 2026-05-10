@@ -34,6 +34,8 @@ source(file.path(script_dir, "tximport_utils.R"))
 # ── Load params ───────────────────────────────────────────────
 p <- jsonlite::fromJSON(params_file, simplifyDataFrame = TRUE)
 
+resume <- isTRUE(p$resume)
+
 # ── IPC helpers ───────────────────────────────────────────────
 samples       <- as.data.frame(p$samples, stringsAsFactors = FALSE)
 sample_names  <- samples$name
@@ -61,8 +63,11 @@ threads     <- as.integer(p$salmon_threads %||% 4L)
 output_dir  <- as.character(p$output_dir)
 trim_dir    <- file.path(output_dir, "trimmed")
 fastqc_dir  <- file.path(output_dir, "fastqc_pre")
+fastqc_post_dir <- file.path(output_dir, "fastqc_post")
 quant_dir   <- file.path(output_dir, "salmon_quant")
-multiqc_dir <- file.path(output_dir, "multiqc")
+multiqc_dir     <- file.path(output_dir, "multiqc")
+multiqc_pre_dir <- file.path(output_dir, "multiqc_pre")
+multiqc_post_dir <- file.path(output_dir, "multiqc_post")
 
 adapter_fasta <- {
   af <- p$adapter_fasta %||% ""
@@ -80,22 +85,34 @@ n_samples <- nrow(samples)
 
 # ── Calculate total steps ─────────────────────────────────────
 total <- 1L
-if (isTRUE(p$trimming_enabled)) total <- total + n_samples
+if (isTRUE(p$trimming_enabled)) total <- total + n_samples + 1L + 1L  # fastp + post-FastQC + extra MultiQC
 if (isTRUE(p$build_new_index))  total <- total + 1L
 total <- total + n_samples + 2L  # quant per sample + tximport + MultiQC
 step <- 0L
 
 write_log("=== Pipeline SalmonFlow iniciado ===", "info")
 write_log(paste("Muestras:", n_samples, "| Modo:", mode), "info")
+if (resume) write_log("Modo REANUDAR activo — pasos con resultados previos seran omitidos", "info")
 write_state(step, total, TRUE)
 
-# ── STEP 1: FastQC ───────────────────────────────────────────
+# ── Helper: FastQC output stem ────────────────────────────────
+fastqc_stem <- function(f) sub("\\.(fastq|fq)(\\.gz)?$", "", basename(f), ignore.case = TRUE)
+
+# ── STEP 1: FastQC (pre-trimming) ─────────────────────────────
 write_log("-- Paso 1: FastQC (pre-trimming) --", "info")
 all_fastqs <- samples$r1
 if (!is_se) all_fastqs <- c(all_fastqs, samples$r2)
 all_fastqs <- all_fastqs[!is.na(all_fastqs) & nchar(all_fastqs) > 0]
 
-run_fastqc(all_fastqs, fastqc_dir, threads = threads, log_callback = write_log)
+fastqc_pre_done <- resume && all(sapply(all_fastqs, function(f) {
+  file.exists(file.path(fastqc_dir, paste0(fastqc_stem(f), "_fastqc.zip")))
+}))
+
+if (fastqc_pre_done) {
+  write_log("FastQC (pre-trimming): omitido (resultados previos encontrados)", "info")
+} else {
+  run_fastqc(all_fastqs, fastqc_dir, threads = threads, log_callback = write_log)
+}
 step <- step + 1L
 write_state(step, total, TRUE)
 
@@ -108,6 +125,19 @@ if (isTRUE(p$trimming_enabled)) {
     sname <- sample_names[i]
     sample_status[sname] <- "running"
     write_state(step, total, TRUE)
+
+    r1_out <- file.path(trim_dir, paste0(sname, "_R1_trimmed.fastq.gz"))
+    r2_out <- if (is_se) NULL else file.path(trim_dir, paste0(sname, "_R2_trimmed.fastq.gz"))
+
+    if (resume && file.exists(r1_out) && (is_se || file.exists(r2_out))) {
+      trimmed_samples$r1[i] <- r1_out
+      if (!is_se) trimmed_samples$r2[i] <- r2_out
+      sample_status[sname] <- "done"
+      write_log(paste("fastp:", sname, "— omitido (salida previa encontrada)"), "info")
+      step <- step + 1L
+      write_state(step, total, TRUE)
+      next
+    }
 
     r2_val <- if (is_se) NULL else {
       v <- samples$r2[i]; if (is.na(v) || nchar(v) == 0) NULL else v
@@ -144,6 +174,24 @@ if (isTRUE(p$trimming_enabled)) {
   for (s in sample_names) {
     if (sample_status[s] == "done") sample_status[s] <- "pending"
   }
+
+  # ── STEP 2b: FastQC (post-trimming) ───────────────────────
+  write_log("-- Paso 2b: FastQC (post-trimming) --", "info")
+  trimmed_fastqs <- trimmed_samples$r1
+  if (!is_se) trimmed_fastqs <- c(trimmed_fastqs, trimmed_samples$r2)
+  trimmed_fastqs <- trimmed_fastqs[!is.na(trimmed_fastqs) & nchar(trimmed_fastqs) > 0]
+
+  fastqc_post_done <- resume && all(sapply(trimmed_fastqs, function(f) {
+    file.exists(file.path(fastqc_post_dir, paste0(fastqc_stem(f), "_fastqc.zip")))
+  }))
+
+  if (fastqc_post_done) {
+    write_log("FastQC (post-trimming): omitido (resultados previos encontrados)", "info")
+  } else {
+    run_fastqc(trimmed_fastqs, fastqc_post_dir, threads = threads, log_callback = write_log)
+  }
+  step <- step + 1L
+  write_state(step, total, TRUE)
 } else {
   write_log("-- Paso 2: fastp (omitido) --", "info")
 }
@@ -151,28 +199,36 @@ if (isTRUE(p$trimming_enabled)) {
 # ── STEP 3: Salmon index ─────────────────────────────────────
 if (isTRUE(p$build_new_index)) {
   write_log("-- Paso 3: Construccion del indice Salmon --", "info")
-  decoy_file <- if (isTRUE(p$decoy_aware)) {
-    gf <- p$genome_fasta %||% ""; if (nchar(gf) > 0) gf else NULL
-  } else NULL
 
-  idx_result <- build_salmon_index(
-    fasta        = as.character(p$transcriptome_fasta),
-    outdir       = index_dir,
-    decoy        = decoy_file,
-    kmer         = as.integer(p$kmer_size %||% 31L),
-    threads      = threads,
-    sparse       = isTRUE(p$sparse_index),
-    log_callback = write_log
-  )
-  step <- step + 1L
-  write_state(step, total, TRUE)
+  index_done <- resume && file.exists(file.path(index_dir, "info.json"))
+  if (index_done) {
+    write_log("Salmon index: omitido (indice previo encontrado)", "info")
+    step <- step + 1L
+    write_state(step, total, TRUE)
+  } else {
+    decoy_file <- if (isTRUE(p$decoy_aware)) {
+      gf <- p$genome_fasta %||% ""; if (nchar(gf) > 0) gf else NULL
+    } else NULL
 
-  if (idx_result$exit_status != 0) {
-    write_log("Pipeline abortado: error al construir el indice", "error")
-    write_state(step, total, FALSE)
-    quit(status = 1, save = "no")
+    idx_result <- build_salmon_index(
+      fasta        = as.character(p$transcriptome_fasta),
+      outdir       = index_dir,
+      decoy        = decoy_file,
+      kmer         = as.integer(p$kmer_size %||% 31L),
+      threads      = threads,
+      sparse       = isTRUE(p$sparse_index),
+      log_callback = write_log
+    )
+    step <- step + 1L
+    write_state(step, total, TRUE)
+
+    if (idx_result$exit_status != 0) {
+      write_log("Pipeline abortado: error al construir el indice", "error")
+      write_state(step, total, FALSE)
+      quit(status = 1, save = "no")
+    }
+    index_dir <- idx_result$index_dir
   }
-  index_dir <- idx_result$index_dir
 } else {
   write_log("-- Paso 3: Indice Salmon (usando existente) --", "info")
 }
@@ -185,6 +241,18 @@ for (i in seq_len(n_samples)) {
   sname <- sample_names[i]
   sample_status[sname] <- "running"
   write_state(step, total, TRUE)
+
+  quant_sf <- file.path(quant_dir, sname, "quant.sf")
+
+  if (resume && file.exists(quant_sf)) {
+    sample_status[sname] <- "done"
+    salmon_metas[[sname]] <- parse_salmon_meta(file.path(quant_dir, sname))
+    write_log(paste("Salmon quant:", sname, "— omitido (quant.sf previo encontrado)"), "info")
+    step <- step + 1L
+    write_log(paste("  Salmon quant:", i, "/", n_samples), "info")
+    write_state(step, total, TRUE)
+    next
+  }
 
   r2_val <- if (is_se) NULL else {
     v <- trimmed_samples$r2[i]; if (is.na(v) || nchar(v) == 0) NULL else v
@@ -248,15 +316,38 @@ count_matrix_path <- file.path(output_dir, "merged_lengthScaledTPM.csv")
 write_state(step, total, TRUE)
 
 # ── STEP 6: MultiQC ──────────────────────────────────────────
-write_log("-- Paso 6: MultiQC --", "info")
-run_multiqc(output_dir, multiqc_dir, log_callback = write_log)
-step <- step + 1L
+if (isTRUE(p$trimming_enabled)) {
+  write_log("-- Paso 6a: MultiQC (pre-trimming) --", "info")
+  run_multiqc(c(fastqc_dir, trim_dir), multiqc_pre_dir, log_callback = write_log)
+  step <- step + 1L
+  write_state(step, total, TRUE)
 
-multiqc_report_path <- file.path(multiqc_dir, "multiqc_report.html")
-if (!file.exists(multiqc_report_path)) multiqc_report_path <- ""
+  write_log("-- Paso 6b: MultiQC (post-trimming) --", "info")
+  run_multiqc(c(fastqc_post_dir, quant_dir), multiqc_post_dir, log_callback = write_log)
+  step <- step + 1L
 
-write_log("=== Pipeline completado exitosamente ===", "success")
-write_state(step, total, FALSE,
-            count_matrix_path   = count_matrix_path,
-            multiqc_report_path = multiqc_report_path,
-            salmon_meta_path    = salmon_meta_path)
+  multiqc_pre_report_path  <- file.path(multiqc_pre_dir,  "multiqc_report.html")
+  multiqc_post_report_path <- file.path(multiqc_post_dir, "multiqc_report.html")
+  if (!file.exists(multiqc_pre_report_path))  multiqc_pre_report_path  <- ""
+  if (!file.exists(multiqc_post_report_path)) multiqc_post_report_path <- ""
+
+  write_log("=== Pipeline completado exitosamente ===", "success")
+  write_state(step, total, FALSE,
+              count_matrix_path        = count_matrix_path,
+              multiqc_pre_report_path  = multiqc_pre_report_path,
+              multiqc_post_report_path = multiqc_post_report_path,
+              salmon_meta_path         = salmon_meta_path)
+} else {
+  write_log("-- Paso 6: MultiQC --", "info")
+  run_multiqc(output_dir, multiqc_dir, log_callback = write_log)
+  step <- step + 1L
+
+  multiqc_report_path <- file.path(multiqc_dir, "multiqc_report.html")
+  if (!file.exists(multiqc_report_path)) multiqc_report_path <- ""
+
+  write_log("=== Pipeline completado exitosamente ===", "success")
+  write_state(step, total, FALSE,
+              count_matrix_path   = count_matrix_path,
+              multiqc_report_path = multiqc_report_path,
+              salmon_meta_path    = salmon_meta_path)
+}

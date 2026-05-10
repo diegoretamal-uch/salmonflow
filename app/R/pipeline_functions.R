@@ -308,17 +308,17 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
   )
 }
 
-#' Run MultiQC on a directory tree
-#' @param input_dir Directory to scan for tool outputs
+#' Run MultiQC on one or more directory trees
+#' @param input_dirs Character vector of directories to scan for tool outputs
 #' @param outdir Output directory for MultiQC report
 #' @param log_callback Function(msg, type) for live logging
 #' @return List with exit_status and report_path
-run_multiqc <- function(input_dir, outdir, log_callback = NULL) {
+run_multiqc <- function(input_dirs, outdir, log_callback = NULL) {
   dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
   if (!is.null(log_callback)) log_callback("MultiQC: generating report...", "info")
 
-  args <- c(input_dir,
+  args <- c(input_dirs,
             "--outdir", outdir,
             "--filename", "multiqc_report",
             "--force")

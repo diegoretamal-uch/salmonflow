@@ -134,17 +134,35 @@ mod_results_server <- function(id, shared) {
 
     # ── MultiQC link ───────────────────────────────────────
     output$multiqc_link <- renderUI({
-      rpt <- shared$multiqc_report
-      if (is.null(rpt) || !file.exists(rpt)) {
-        tags$p(style = "color:#5a6373;", "No hay reporte MultiQC disponible aún.")
-      } else {
-        # Serve via Shiny addResourcePath
-        addResourcePath("multiqc", dirname(rpt))
-        tags$a(href = paste0("multiqc/", basename(rpt)),
+      pre  <- shared$multiqc_pre_report
+      post <- shared$multiqc_post_report
+      uni  <- shared$multiqc_report
+
+      has_pre  <- !is.null(pre)  && nchar(pre)  > 0 && file.exists(pre)
+      has_post <- !is.null(post) && nchar(post) > 0 && file.exists(post)
+      has_uni  <- !is.null(uni)  && nchar(uni)  > 0 && file.exists(uni)
+
+      if (has_pre && has_post) {
+        addResourcePath("multiqc_pre",  dirname(pre))
+        addResourcePath("multiqc_post", dirname(post))
+        tagList(
+          tags$a(href = paste0("multiqc_pre/",  basename(pre)),
+                 target = "_blank", class = "btn btn-primary",
+                 style = "margin-right:8px;",
+                 icon("external-link-alt"), " MultiQC Pre-Trimming"),
+          tags$a(href = paste0("multiqc_post/", basename(post)),
+                 target = "_blank", class = "btn btn-success",
+                 icon("external-link-alt"), " MultiQC Post-Trimming")
+        )
+      } else if (has_uni) {
+        addResourcePath("multiqc", dirname(uni))
+        tags$a(href = paste0("multiqc/", basename(uni)),
                target = "_blank",
                class = "btn btn-primary",
                icon("external-link-alt"),
                " Abrir MultiQC Report")
+      } else {
+        tags$p(style = "color:#5a6373;", "No hay reporte MultiQC disponible aún.")
       }
     })
 

@@ -25,12 +25,17 @@ mod_run_ui <- function(id) {
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
-            column(4,
+            column(3,
               actionButton(ns("run_btn"), "Iniciar análisis",
                            class = "btn-primary", icon = icon("play"),
                            style = "width:100%; font-size:16px; padding:14px;")
             ),
-            column(4,
+            column(3,
+              actionButton(ns("resume_btn"), "Reanudar análisis",
+                           class = "btn-warning", icon = icon("rotate-right"),
+                           style = "width:100%; font-size:16px; padding:14px;")
+            ),
+            column(3,
               actionButton(ns("cancel_btn"), "Cancelar",
                            class = "btn-danger", icon = icon("stop"),
                            style = "width:100%; font-size:16px; padding:14px;")
@@ -63,7 +68,13 @@ mod_run_ui <- function(id) {
           br(),
 
           tags$strong("Log en vivo:"),
-          uiOutput(ns("live_log"))
+          # Static container — content is pushed via shinyjs::html() to avoid
+          # Shiny re-rendering the element (which resets scrollTop every time).
+          tags$div(
+            id    = ns("log_content"),
+            class = "log-panel",
+            tags$span(class = "log-info", "Esperando inicio del análisis...")
+          )
         )
       )
     )
@@ -96,7 +107,6 @@ mod_run_server <- function(id, shared) {
 
     # ── Reactive state ─────────────────────────────────────
     rv <- reactiveValues(
-      log_lines     = character(0),
       log_pos       = 0L,
       running       = FALSE,
       proc          = NULL,
@@ -107,22 +117,17 @@ mod_run_server <- function(id, shared) {
       sample_status = list()
     )
 
-    # Shiny-side log helper (for validation messages, cancel, etc.)
+    # Append a line to the static log div and scroll to bottom.
+    # shinyjs::html() with add=TRUE appends without replacing the element,
+    # so the browser never resets scrollTop.
     add_log <- function(msg, type = "info") {
-      rv$log_lines <- c(rv$log_lines, timestamp_log(msg, type))
+      line <- timestamp_log(msg, type)
+      shinyjs::html("log_content", html = paste0(line, "<br/>"), add = TRUE)
+      shinyjs::runjs(sprintf(
+        "(function(){ var el = document.getElementById('%s'); if(el) el.scrollTop = el.scrollHeight; })()",
+        ns("log_content")
+      ))
     }
-
-    # ── Live log output ────────────────────────────────────
-    output$live_log <- renderUI({
-      lines <- rv$log_lines
-      if (length(lines) == 0) {
-        tags$div(class = "log-panel",
-                 tags$span(class = "log-info", "Esperando inicio del análisis..."))
-      } else {
-        tags$div(class = "log-panel",
-                 HTML(paste(lines, collapse = "<br/>")))
-      }
-    })
 
     # ── Progress bar ───────────────────────────────────────
     observe({
@@ -171,7 +176,7 @@ mod_run_server <- function(id, shared) {
       if (!rv$running) return()
       invalidateLater(500, session)
 
-      # Read new log lines from file
+      # Read new log lines from file and push directly into the DOM
       if (!is.null(rv$log_file) && file.exists(rv$log_file)) {
         all_lines <- readLines(rv$log_file, warn = FALSE)
         n_new <- length(all_lines) - rv$log_pos
@@ -186,8 +191,14 @@ mod_run_server <- function(id, shared) {
               timestamp_log(l, "info")
             }
           }, character(1L))
-          rv$log_lines <- c(rv$log_lines, unname(formatted))
           rv$log_pos <- length(all_lines)
+
+          new_html <- paste(formatted, collapse = "<br/>")
+          shinyjs::html("log_content", html = paste0(new_html, "<br/>"), add = TRUE)
+          shinyjs::runjs(sprintf(
+            "(function(){ var el = document.getElementById('%s'); if(el) el.scrollTop = el.scrollHeight; })()",
+            ns("log_content")
+          ))
         }
       }
 
@@ -216,9 +227,20 @@ mod_run_server <- function(id, shared) {
               )
             }
 
+            # Single unified MultiQC (no trimming)
             mq_path <- state$multiqc_report_path %||% ""
             if (nchar(mq_path) > 0 && file.exists(mq_path)) {
               shared$multiqc_report <- mq_path
+            }
+
+            # Dual MultiQC (trimming enabled)
+            mq_pre_path <- state$multiqc_pre_report_path %||% ""
+            if (nchar(mq_pre_path) > 0 && file.exists(mq_pre_path)) {
+              shared$multiqc_pre_report <- mq_pre_path
+            }
+            mq_post_path <- state$multiqc_post_report_path %||% ""
+            if (nchar(mq_post_path) > 0 && file.exists(mq_post_path)) {
+              shared$multiqc_post_report <- mq_post_path
             }
 
             sm_path <- state$salmon_meta_path %||% ""
@@ -250,8 +272,8 @@ mod_run_server <- function(id, shared) {
       }
     })
 
-    # ── Run button ─────────────────────────────────────────
-    observeEvent(input$run_btn, {
+    # ── Shared launch logic ────────────────────────────────
+    launch_pipeline <- function(resume = FALSE) {
       samples <- shared$samples
       if (is.null(samples) || nrow(samples) == 0) {
         add_log("Error: no hay muestras cargadas. Ve a la pestaña Muestras.", "error")
@@ -265,6 +287,14 @@ mod_run_server <- function(id, shared) {
       if (is.null(shared$gtf_path) || length(shared$gtf_path) == 0) {
         add_log("Error: no se ha seleccionado un archivo GTF. Ve a la pestaña Referencias.", "error")
         return()
+      }
+
+      # Clear log panel, then show resume banner if applicable
+      shinyjs::html("log_content", html = "", add = FALSE)
+      if (resume) {
+        add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "warn")
+        add_log("⟳ REANUDANDO — pasos con resultados previos seran omitidos automaticamente", "warn")
+        add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "warn")
       }
 
       # IPC file paths
@@ -303,12 +333,12 @@ mod_run_server <- function(id, shared) {
         salmon_discard_orphans = isTRUE(shared$salmon_discard_orphans),
         txi_method            = shared$txi_method,
         txi_ignore_version    = isTRUE(shared$txi_ignore_version),
-        output_dir            = shared$output_dir
+        output_dir            = shared$output_dir,
+        resume                = resume
       )
       jsonlite::write_json(params, params_file, auto_unbox = TRUE)
 
-      # Reset UI state
-      rv$log_lines    <- character(0)
+      # Reset state
       rv$log_pos      <- 0L
       rv$current_step <- 0
       rv$sample_status <- setNames(
@@ -331,6 +361,16 @@ mod_run_server <- function(id, shared) {
       )
 
       add_log(paste("Pipeline iniciado (PID:", rv$proc$get_pid(), ")"), "info")
+    }
+
+    # ── Run button ─────────────────────────────────────────
+    observeEvent(input$run_btn, {
+      launch_pipeline(resume = FALSE)
+    })
+
+    # ── Resume button ──────────────────────────────────────
+    observeEvent(input$resume_btn, {
+      launch_pipeline(resume = TRUE)
     })
   })
 }
