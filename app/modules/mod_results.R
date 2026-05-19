@@ -50,22 +50,24 @@ mod_results_ui <- function(id) {
       )
     ),
 
-    fluidRow(
-      column(6,
-        box(
-          title = "PCA — Top Variable Genes",
-          status = "primary", solidHeader = FALSE, width = 12,
-          plotlyOutput(ns("pca_plot"), height = "450px")
-        )
-      ),
-      column(6,
-        box(
-          title = "Heatmap — Top 50 Genes Más Variables",
-          status = "primary", solidHeader = FALSE, width = 12,
-          plotOutput(ns("heatmap_plot"), height = "500px")
+    if (FALSE) {
+      fluidRow(
+        column(6,
+          box(
+            title = "PCA — Top Variable Genes",
+            status = "primary", solidHeader = FALSE, width = 12,
+            plotlyOutput(ns("pca_plot"), height = "450px")
+          )
+        ),
+        column(6,
+          box(
+            title = "Heatmap — Top 50 Genes Más Variables",
+            status = "primary", solidHeader = FALSE, width = 12,
+            plotOutput(ns("heatmap_plot"), height = "500px")
+          )
         )
       )
-    )
+    }
   )
 }
 

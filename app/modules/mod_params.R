@@ -78,14 +78,15 @@ mod_params_ui <- function(id) {
                        "Min score fraction (--minScoreFraction)",
                        value = 0.65, min = 0.0, max = 1.0, step = 0.05),
 
-          checkboxInput(ns("salmon_discard_orphans"),
-                        "Discard orphan reads (--discardOrphansQuasi)",
-                        value = FALSE),
+          if (FALSE) {
+            checkboxInput(ns("salmon_discard_orphans"),
+                          "Discard orphan reads (--discardOrphansQuasi)",
+                          value = FALSE)
+          },
 
           helpText(
             "Bootstraps: set >= 100 for uncertainty quantification (sleuth, DTU).",
-            "Min score fraction: lower = more permissive mapping.",
-            "Discard orphans: stricter PE mode, discards reads whose mate did not map."
+            "Min score fraction: lower = more permissive mapping."
           )
         ),
 
