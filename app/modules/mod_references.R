@@ -60,9 +60,9 @@ mod_references_ui <- function(id) {
           status = "primary", solidHeader = FALSE, width = 12,
 
           radioButtons(ns("index_mode"), "Modo de índice",
-                       choices = c("Construir nuevo índice" = "build",
-                                   "Usar índice existente"  = "existing"),
-                       selected = "build", inline = TRUE),
+                       choices = c("Usar índice existente"  = "existing",
+                                   "Construir nuevo índice" = "build"),
+                       selected = "existing", inline = TRUE),
 
           conditionalPanel(
             condition = paste0("input['", ns("index_mode"), "'] == 'existing'"),

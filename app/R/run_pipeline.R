@@ -150,10 +150,11 @@ if (isTRUE(p$trimming_enabled)) {
       sample_name       = sname,
       mode              = mode,
       adapter_fasta     = adapter_fasta,
-      cut_front_quality = as.numeric(p$fastp_cut_front %||% 3),
-      cut_tail_quality  = as.numeric(p$fastp_cut_tail  %||% 3),
-      cut_right_quality = as.numeric(p$fastp_cut_right %||% 15),
-      minlen            = as.integer(p$fastp_minlen    %||% 36L),
+      cut_front_quality = as.numeric(p$fastp_cut_front   %||% 20),
+      cut_tail_quality  = as.numeric(p$fastp_cut_tail    %||% 20),
+      cut_right_quality = as.numeric(p$fastp_cut_right   %||% 20),
+      window_size       = as.integer(p$fastp_window_size %||% 4L),
+      minlen            = as.integer(p$fastp_minlen      %||% 36L),
       threads           = threads,
       log_callback      = write_log
     )

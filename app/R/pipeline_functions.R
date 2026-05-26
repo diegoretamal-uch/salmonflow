@@ -59,7 +59,8 @@ run_fastqc <- function(files, outdir, threads = 4, log_callback = NULL) {
 #' @param adapter_fasta Path to adapter FASTA (NULL = auto-detect for PE)
 #' @param cut_front_quality --cut_front_mean_quality threshold
 #' @param cut_tail_quality --cut_tail_mean_quality threshold
-#' @param cut_right_quality --cut_right_mean_quality threshold (window = 4)
+#' @param cut_right_quality --cut_right_mean_quality threshold
+#' @param window_size --cut_right_window_size (number of bases in sliding window)
 #' @param minlen --length_required threshold
 #' @param threads Number of threads
 #' @param log_callback Function(msg, type) for live logging
@@ -67,8 +68,8 @@ run_fastqc <- function(files, outdir, threads = 4, log_callback = NULL) {
 run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
                       mode = "PE",
                       adapter_fasta = NULL,
-                      cut_front_quality = 3, cut_tail_quality = 3,
-                      cut_right_quality = 15, minlen = 36,
+                      cut_front_quality = 20, cut_tail_quality = 20,
+                      cut_right_quality = 20, window_size = 4, minlen = 36,
                       threads = 4, log_callback = NULL) {
 
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -88,7 +89,7 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
   args <- c(args,
     "--cut_front",  "--cut_front_mean_quality",  as.character(cut_front_quality),
     "--cut_tail",   "--cut_tail_mean_quality",   as.character(cut_tail_quality),
-    "--cut_right",  "--cut_right_window_size", "4",
+    "--cut_right",  "--cut_right_window_size", as.character(window_size),
                     "--cut_right_mean_quality",  as.character(cut_right_quality),
     "--length_required", as.character(minlen),
     "--thread", as.character(threads),
