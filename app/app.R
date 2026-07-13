@@ -54,11 +54,11 @@ ui <- dashboardPage(
     width = 260,
     sidebarMenu(
       id = "main_tabs",
-      menuItem("Muestras",    tabName = "tab_samples",    icon = icon("folder-open")),
-      menuItem("Referencias", tabName = "tab_references", icon = icon("dna")),
-      menuItem("Parámetros",  tabName = "tab_params",     icon = icon("sliders-h")),
-      menuItem("Ejecutar",    tabName = "tab_run",        icon = icon("play")),
-      menuItem("Resultados",  tabName = "tab_results",    icon = icon("chart-bar"))
+      menuItem("Samples",     tabName = "tab_samples",    icon = icon("folder-open")),
+      menuItem("References",  tabName = "tab_references", icon = icon("dna")),
+      menuItem("Parameters",  tabName = "tab_params",     icon = icon("sliders-h")),
+      menuItem("Run",         tabName = "tab_run",        icon = icon("play")),
+      menuItem("Results",     tabName = "tab_results",    icon = icon("chart-bar"))
     ),
     tags$div(
       style = "position:absolute; bottom:10px; width:100%; text-align:center;
@@ -134,6 +134,7 @@ server <- function(input, output, session) {
     multiqc_report       = NULL,
     multiqc_pre_report   = NULL,
     multiqc_post_report  = NULL,
+    run_summary          = NULL,
     output_dir           = DATA_OUTPUT
   )
 

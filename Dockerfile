@@ -44,8 +44,23 @@ RUN R -e "BiocManager::install(c('tximport', 'GenomicFeatures', 'txdbmaker'), \
 # ── Copy application ────────────────────────────────────────────────
 COPY app/ /srv/shiny-server/salmonflow/
 
-# ── Data directories (will be overridden by volume mounts) ──────────
-RUN mkdir -p /data/input /data/references /data/output /data/tmp
+# ── Non-root runtime user ───────────────────────────────────────────
+# Files written into bind-mounted volumes inherit the container process UID.
+# Running as UID/GID 1000 (the typical first host user) keeps pipeline output
+# owned by the host user instead of root. Override at build time to match a
+# different host user:  docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
+ARG UID=1000
+ARG GID=1000
+RUN if ! getent group ${GID} >/dev/null; then groupadd -g ${GID} appuser; fi \
+    && if ! getent passwd ${UID} >/dev/null; then \
+         useradd -u ${UID} -g ${GID} -m -d /home/appuser -s /bin/bash appuser; \
+       fi \
+    && mkdir -p /home/appuser /data/input /data/references /data/output /data/tmp \
+    && chown -R ${UID}:${GID} /home/appuser /data /srv/shiny-server/salmonflow
+
+# R (and MultiQC) need a writable HOME for their user library / config / cache.
+ENV HOME=/home/appuser
+USER ${UID}:${GID}
 
 EXPOSE 3838
 

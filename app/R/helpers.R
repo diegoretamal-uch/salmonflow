@@ -121,3 +121,14 @@ timestamp_log <- function(msg, type = "info") {
 
 #' Null-coalescing operator
 `%||%` <- function(a, b) if (is.null(a) || length(a) == 0) b else a
+
+#' Generate a custom CSS-based HTML tooltip icon and popup text
+#' @param text Tooltip content text
+#' @return HTML tag list for tooltip
+html_tooltip <- function(text) {
+  tags$span(
+    class = "sf-tooltip",
+    icon("info-circle", class = "sf-tooltip-icon"),
+    tags$span(class = "sf-tooltip-text", text)
+  )
+}

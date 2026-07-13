@@ -10,7 +10,28 @@ mod_run_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "Resumen de configuración",
+          title = tagList(icon("info-circle"), "Quick Guide: Pipeline Execution"),
+          status = "info", solidHeader = FALSE, width = 12,
+          collapsible = TRUE, collapsed = TRUE,
+          tags$div(
+            style = "line-height: 1.6;",
+            tags$p("This tab manages the background execution of the RNA-Seq pipeline:"),
+            tags$ul(
+              tags$li(tags$strong("Start Analysis:"), " Click this to launch the pipeline from scratch. It will process all samples sequentially."),
+              tags$li(tags$strong("Resume Analysis:"), " Re-run the pipeline skipping any steps that already have completed outputs (e.g. if a previous run was interrupted)."),
+              tags$li(tags$strong("Cancel:"), " Safely stop the background R process."),
+              tags$li(tags$strong("Overall Progress:"), " Monitor the completion status of the entire run."),
+              tags$li(tags$strong("Live Log:"), " View real-time console logs directly from the background runner.")
+            )
+          )
+        )
+      )
+    ),
+
+    fluidRow(
+      column(12,
+        box(
+          title = tagList("Configuration Summary", html_tooltip("Check the active settings before starting the pipeline run.")),
           status = "primary", solidHeader = FALSE, width = 12,
           collapsible = TRUE,
           uiOutput(ns("config_summary"))
@@ -21,22 +42,22 @@ mod_run_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "Ejecución del Pipeline",
+          title = tagList("Pipeline Execution", html_tooltip("Launch, monitor, or cancel the background pipeline runner.")),
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
             column(3,
-              actionButton(ns("run_btn"), "Iniciar análisis",
+              actionButton(ns("run_btn"), "Start Analysis",
                            class = "btn-primary", icon = icon("play"),
                            style = "width:100%; font-size:16px; padding:14px;")
             ),
             column(3,
-              actionButton(ns("resume_btn"), "Reanudar análisis",
+              actionButton(ns("resume_btn"), "Resume Analysis",
                            class = "btn-warning", icon = icon("rotate-right"),
                            style = "width:100%; font-size:16px; padding:14px;")
             ),
             column(3,
-              actionButton(ns("cancel_btn"), "Cancelar",
+              actionButton(ns("cancel_btn"), "Cancel",
                            class = "btn-danger", icon = icon("stop"),
                            style = "width:100%; font-size:16px; padding:14px;")
             ),
@@ -50,7 +71,7 @@ mod_run_ui <- function(id) {
           br(),
 
           tags$div(
-            tags$strong("Progreso general:"),
+            tags$strong("Overall Progress:"),
             tags$div(class = "progress",
               tags$div(id = ns("progress_bar"),
                        class = "progress-bar",
@@ -62,18 +83,18 @@ mod_run_ui <- function(id) {
 
           br(),
 
-          tags$strong("Progreso por muestra:"),
+          tags$strong("Per-Sample Progress:"),
           uiOutput(ns("sample_status_list")),
 
           br(),
 
-          tags$strong("Log en vivo:"),
+          tags$strong("Live Log:"),
           # Static container — content is pushed via shinyjs::html() to avoid
           # Shiny re-rendering the element (which resets scrollTop every time).
           tags$div(
             id    = ns("log_content"),
             class = "log-panel",
-            tags$span(class = "log-info", "Esperando inicio del análisis...")
+            tags$span(class = "log-info", "Waiting for analysis to start...")
           )
         )
       )
@@ -93,15 +114,27 @@ mod_run_server <- function(id, shared) {
       trim <- if (shared$trimming_enabled) "ON" else "OFF"
 
       tags$div(class = "config-summary",
-        tags$p(tags$strong("Muestras: "), n_samples, " | ",
-               tags$strong("Tipo: "), lib, " | ",
+        tags$p(tags$strong("Samples: "), n_samples, " | ",
+               tags$strong("Type: "), lib, " | ",
                tags$strong("Trimming: "), trim),
         tags$p(tags$strong("Salmon library: "), shared$salmon_libtype, " | ",
                tags$strong("GC bias: "), ifelse(shared$salmon_gcbias, "ON", "OFF"), " | ",
                tags$strong("Seq bias: "), ifelse(shared$salmon_seqbias, "ON", "OFF"), " | ",
                tags$strong("Threads: "), shared$salmon_threads),
         tags$p(tags$strong("tximport: "), shared$txi_method, " | ",
-               tags$strong("Ignorar versión: "), ifelse(shared$txi_ignore_version, "Sí", "No"))
+               tags$strong("Ignore version: "), ifelse(shared$txi_ignore_version, "Yes", "No")),
+        if (isTRUE(shared$delete_originals_after_trim)) {
+          tags$p(style = "color:#a94442;",
+                 icon("triangle-exclamation"),
+                 tags$strong(" Temporary Files: "),
+                 "raw FASTQ files will be deleted after each trim")
+        },
+        if (isTRUE(shared$delete_trimmed_after_quant)) {
+          tags$p(style = "color:#a94442;",
+                 icon("triangle-exclamation"),
+                 tags$strong(" Temporary Files: "),
+                 "trimmed FASTQ files will be deleted after their quantification")
+        }
       )
     })
 
@@ -142,11 +175,11 @@ mod_run_server <- function(id, shared) {
     # ── Pipeline status badge ──────────────────────────────
     output$pipeline_status_badge <- renderUI({
       if (rv$running) {
-        tags$span(class = "badge-running", "Pipeline en ejecución")
+        tags$span(class = "badge-running", "Pipeline running")
       } else if (rv$current_step >= rv$total_steps && rv$current_step > 0) {
-        tags$span(class = "badge-success", "Pipeline completado")
+        tags$span(class = "badge-success", "Pipeline completed")
       } else {
-        tags$span(style = "color:#5a6373;", "Listo para ejecutar")
+        tags$span(style = "color:#5a6373;", "Ready to run")
       }
     })
 
@@ -250,6 +283,11 @@ mod_run_server <- function(id, shared) {
                 error = function(e) NULL
               )
             }
+
+            summary_path <- state$summary_path %||% ""
+            if (nchar(summary_path) > 0 && file.exists(summary_path)) {
+              shared$run_summary <- summary_path
+            }
           }
         }
       }
@@ -258,7 +296,7 @@ mod_run_server <- function(id, shared) {
       if (!is.null(rv$proc) && !rv$proc$is_alive() && rv$running) {
         rv$running              <- FALSE
         shared$pipeline_running <- FALSE
-        add_log("Pipeline terminado inesperadamente — revisa los logs", "warn")
+        add_log("Pipeline finished unexpectedly — check the logs", "warn")
       }
     })
 
@@ -268,7 +306,7 @@ mod_run_server <- function(id, shared) {
         if (!is.null(rv$proc) && rv$proc$is_alive()) rv$proc$kill()
         rv$running              <- FALSE
         shared$pipeline_running <- FALSE
-        add_log("Pipeline cancelado por el usuario", "warn")
+        add_log("Pipeline canceled by user", "warn")
       }
     })
 
@@ -276,16 +314,16 @@ mod_run_server <- function(id, shared) {
     launch_pipeline <- function(resume = FALSE) {
       samples <- shared$samples
       if (is.null(samples) || nrow(samples) == 0) {
-        add_log("Error: no hay muestras cargadas. Ve a la pestaña Muestras.", "error")
+        add_log("Error: no samples loaded. Go to the Samples tab.", "error")
         return()
       }
       if (shared$build_new_index &&
           (is.null(shared$transcriptome_fasta) || length(shared$transcriptome_fasta) == 0)) {
-        add_log("Error: no se ha seleccionado un transcriptoma FASTA. Ve a la pestaña Referencias.", "error")
+        add_log("Error: no transcriptome FASTA selected. Go to the References tab.", "error")
         return()
       }
       if (is.null(shared$gtf_path) || length(shared$gtf_path) == 0) {
-        add_log("Error: no se ha seleccionado un archivo GTF. Ve a la pestaña Referencias.", "error")
+        add_log("Error: no GTF file selected. Go to the References tab.", "error")
         return()
       }
 
@@ -293,7 +331,7 @@ mod_run_server <- function(id, shared) {
       shinyjs::html("log_content", html = "", add = FALSE)
       if (resume) {
         add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "warn")
-        add_log("⟳ REANUDANDO — pasos con resultados previos seran omitidos automaticamente", "warn")
+        add_log("⟳ RESUMING — steps with previous results will be automatically skipped", "warn")
         add_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "warn")
       }
 
@@ -313,7 +351,10 @@ mod_run_server <- function(id, shared) {
         fastp_cut_front       = shared$fastp_cut_front,
         fastp_cut_tail        = shared$fastp_cut_tail,
         fastp_cut_right       = shared$fastp_cut_right,
+        fastp_window_size     = shared$fastp_window_size,
         fastp_minlen          = shared$fastp_minlen,
+        delete_originals_after_trim = isTRUE(shared$delete_originals_after_trim),
+        delete_trimmed_after_quant  = isTRUE(shared$delete_trimmed_after_quant),
         adapter_fasta         = shared$adapter_fasta %||% "",
         transcriptome_fasta   = shared$transcriptome_fasta %||% "",
         gtf_path              = shared$gtf_path %||% "",
@@ -360,7 +401,7 @@ mod_run_server <- function(id, shared) {
         stderr = stderr_file
       )
 
-      add_log(paste("Pipeline iniciado (PID:", rv$proc$get_pid(), ")"), "info")
+      add_log(paste("Pipeline started (PID:", rv$proc$get_pid(), ")"), "info")
     }
 
     # ── Run button ─────────────────────────────────────────

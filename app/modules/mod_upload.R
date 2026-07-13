@@ -10,18 +10,38 @@ mod_upload_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "Carga de Muestras",
+          title = tagList(icon("info-circle"), "Quick Guide: Loading Samples"),
+          status = "info", solidHeader = FALSE, width = 12,
+          collapsible = TRUE, collapsed = TRUE,
+          tags$div(
+            style = "line-height: 1.6;",
+            tags$p("This tab allows you to configure your input RNA-Seq datasets:"),
+            tags$ul(
+              tags$li(tags$strong("Library Type:"), " Choose whether your samples are Paired-end (two files per sample, e.g., _R1 and _R2) or Single-end (one file)."),
+              tags$li(tags$strong("Select FASTQs Folder:"), " Click the button to select the directory containing your raw sequencing data."),
+              tags$li(tags$strong("Auto-detect Pairs:"), " Click this to automatically identify and pair your samples from the selected folder."),
+              tags$li(tags$strong("Validate Samples:"), " Runs a check to verify that all specified files exist and are readable before launching.")
+            )
+          )
+        )
+      )
+    ),
+
+    fluidRow(
+      column(12,
+        box(
+          title = tagList("Load Samples", html_tooltip("Select your FASTQ folder, configure the library type, and auto-detect or manually define the sample metadata table.")),
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
             column(4,
-              radioButtons(ns("lib_type"), "Tipo de librería",
+              radioButtons(ns("lib_type"), "Library Type",
                            choices  = c("Paired-end" = "PE", "Single-end" = "SE"),
                            selected = "PE", inline = TRUE)
             ),
             column(4,
-              shinyDirButton(ns("fastq_dir"), "Seleccionar carpeta de FASTQs",
-                             title = "Seleccionar carpeta con archivos FASTQ",
+              shinyDirButton(ns("fastq_dir"), "Select FASTQs Folder",
+                             title = "Select folder with FASTQ files",
                              icon = icon("folder-open"))
             ),
             column(4,
@@ -39,19 +59,19 @@ mod_upload_ui <- function(id) {
 
           fluidRow(
             column(3,
-              actionButton(ns("add_row"), "+ Agregar fila",
+              actionButton(ns("add_row"), "+ Add Row",
                            class = "btn-default", icon = icon("plus"))
             ),
             column(3,
-              actionButton(ns("remove_row"), "- Quitar seleccionada",
+              actionButton(ns("remove_row"), "- Remove Selected",
                            class = "btn-default", icon = icon("minus"))
             ),
             column(3,
-              actionButton(ns("auto_detect"), "Auto-detectar pares",
+              actionButton(ns("auto_detect"), "Auto-detect Pairs",
                            class = "btn-info", icon = icon("search"))
             ),
             column(3,
-              actionButton(ns("validate_btn"), "Validar muestras",
+              actionButton(ns("validate_btn"), "Validate Samples",
                            class = "btn-success", icon = icon("check"))
             )
           ),
@@ -78,7 +98,7 @@ mod_upload_server <- function(id, shared, volumes) {
 
     output$selected_dir_text <- renderText({
       d <- selected_dir()
-      if (is.null(d) || length(d) == 0) "Ninguna carpeta seleccionada"
+      if (is.null(d) || length(d) == 0) "No folder selected"
       else as.character(d)
     })
 
@@ -163,7 +183,7 @@ mod_upload_server <- function(id, shared, volumes) {
       df <- rv$table_data
       if (nrow(df) == 0) {
         output$validation_msg <- renderUI(
-          tags$div(class = "validation-warn", "No hay muestras cargadas")
+          tags$div(class = "validation-warn", "No samples loaded")
         )
         return()
       }
@@ -187,12 +207,12 @@ mod_upload_server <- function(id, shared, volumes) {
         if (result$valid) {
           tagList(
             tags$div(class = "validation-ok",
-                     paste("Todas las", nrow(df), "muestras validadas correctamente")),
+                     paste("All", nrow(df), "samples validated successfully")),
             msgs
           )
         } else {
           tagList(
-            tags$div(class = "validation-warn", "Algunos archivos tienen problemas:"),
+            tags$div(class = "validation-warn", "Some files have issues:"),
             msgs
           )
         }

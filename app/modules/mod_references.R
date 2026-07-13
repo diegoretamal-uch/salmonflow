@@ -10,21 +10,43 @@ mod_references_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "Archivos de Referencia",
+          title = tagList(icon("info-circle"), "Quick Guide: Reference Files"),
+          status = "info", solidHeader = FALSE, width = 12,
+          collapsible = TRUE, collapsed = TRUE,
+          tags$div(
+            style = "line-height: 1.6;",
+            tags$p("This tab configures the references required for alignment-free RNA-Seq quantification:"),
+            tags$ul(
+              tags$li(tags$strong("Transcriptome FASTA:"), " Required. FASTA containing transcript sequences (e.g. from GENCODE or Ensembl) to quantify."),
+              tags$li(tags$strong("GTF Annotation:"), " Required. Maps transcript IDs to gene names, allowing tximport to aggregate transcript counts to the gene level."),
+              tags$li(tags$strong("Adapter FASTA:"), " Optional. Overrides fastp's automatic adapter detection."),
+              tags$li(tags$strong("Index Mode:"), " Use an existing pre-built Salmon index to save time, or build a new one from the transcriptome FASTA."),
+              tags$li(tags$strong("Decoy-Aware Indexing:"), " Recommended. Includes the full genome as a 'decoy' to prevent genomic contamination from falsely mapping to transcripts. Requires a genome FASTA and >= 16 GB RAM."),
+              tags$li(tags$strong("Sparse Index:"), " Reduces the index RAM footprint by 30-50% during build/run, but slightly slows down quantification.")
+            )
+          )
+        )
+      )
+    ),
+
+    fluidRow(
+      column(12,
+        box(
+          title = tagList("Reference Files", html_tooltip("Select your transcriptome FASTA, GTF annotation, and optional adapter sequences.")),
           status = "primary", solidHeader = FALSE, width = 12,
 
           fluidRow(
             column(6,
-              tags$label("Transcriptoma FASTA"),
-              shinyFilesButton(ns("fasta_file"), "Seleccionar",
-                               title = "Seleccionar archivo FASTA del transcriptoma",
+              tags$label("Transcriptome FASTA"),
+              shinyFilesButton(ns("fasta_file"), "Select",
+                               title = "Select Transcriptome FASTA file",
                                multiple = FALSE),
               textOutput(ns("fasta_status"))
             ),
             column(6,
-              tags$label("Anotación GTF"),
-              shinyFilesButton(ns("gtf_file"), "Seleccionar",
-                               title = "Seleccionar archivo GTF de anotación",
+              tags$label("GTF Annotation"),
+              shinyFilesButton(ns("gtf_file"), "Select",
+                               title = "Select GTF annotation file",
                                multiple = FALSE),
               textOutput(ns("gtf_status"))
             )
@@ -34,18 +56,18 @@ mod_references_ui <- function(id) {
 
           fluidRow(
             column(6,
-              tags$label("Adaptadores FASTA (fastp, opcional)"),
-              shinyFilesButton(ns("adapter_file"), "Seleccionar",
-                               title = "Seleccionar FASTA de adaptadores",
+              tags$label("Adapter FASTA (fastp, optional)"),
+              shinyFilesButton(ns("adapter_file"), "Select",
+                               title = "Select adapter FASTA",
                                multiple = FALSE),
               textOutput(ns("adapter_status")),
-              helpText("Opcional — fastp detecta adaptadores automáticamente en datos PE.")
+              helpText("Optional — fastp detects adapters automatically in PE data.")
             ),
             column(6,
-              selectInput(ns("organism"), "Organismo (informativo)",
-                          choices = c("Humano" = "human",
-                                      "Ratón" = "mouse",
-                                      "Otro" = "other"),
+              selectInput(ns("organism"), "Organism (informational)",
+                          choices = c("Human" = "human",
+                                      "Mouse" = "mouse",
+                                      "Other" = "other"),
                           selected = "other")
             )
           )
@@ -56,18 +78,18 @@ mod_references_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = "Índice Salmon",
+          title = tagList("Salmon Index", html_tooltip("Configure whether to use an existing Salmon index or build a new one. Decoy-aware indexing improves quantification accuracy but requires more RAM.")),
           status = "primary", solidHeader = FALSE, width = 12,
 
-          radioButtons(ns("index_mode"), "Modo de índice",
-                       choices = c("Usar índice existente"  = "existing",
-                                   "Construir nuevo índice" = "build"),
+          radioButtons(ns("index_mode"), "Index Mode",
+                       choices = c("Use existing index"  = "existing",
+                                   "Build new index" = "build"),
                        selected = "existing", inline = TRUE),
 
           conditionalPanel(
             condition = paste0("input['", ns("index_mode"), "'] == 'existing'"),
-            shinyDirButton(ns("index_dir"), "Seleccionar directorio del índice",
-                           title = "Directorio del índice Salmon existente"),
+            shinyDirButton(ns("index_dir"), "Select index directory",
+                           title = "Existing Salmon index directory"),
             textOutput(ns("index_dir_status"))
           ),
 
@@ -76,13 +98,20 @@ mod_references_ui <- function(id) {
           fluidRow(
             column(4,
               checkboxInput(ns("decoy_aware"), "Decoy-aware indexing", value = FALSE),
-              helpText("Mayor precisión — requiere genoma FASTA (.fa/.fa.gz). El pipeline genera gentrome y decoys.txt automáticamente.")
+              helpText("Higher accuracy — requires genome FASTA (.fa/.fa.gz). The pipeline generates gentrome and decoys.txt automatically.",
+                       tags$br(),
+                       tags$strong("System Requirements: "),
+                       "including the full genome in the index significantly increases RAM",
+                       " (and disk) usage during construction. For the human genome, ~16 GB of RAM or more is recommended.",
+                       " If the system is low on memory, combine this option with a sparse index.")
             ),
             column(4,
               conditionalPanel(
                 condition = paste0("input['", ns("decoy_aware"), "']"),
-                shinyFilesButton(ns("genome_file"), "Genoma FASTA",
-                                 title = "Seleccionar genoma FASTA para decoys",
+                tags$label("Genome FASTA"),
+                tags$br(),
+                shinyFilesButton(ns("genome_file"), "Select Genome FASTA",
+                                 title = "Select genome FASTA for decoys",
                                  multiple = FALSE),
                 textOutput(ns("genome_status"))
               )
@@ -91,8 +120,12 @@ mod_references_ui <- function(id) {
               selectInput(ns("kmer_size"), "k-mer size",
                           choices = c(21, 23, 25, 27, 29, 31),
                           selected = 31),
-              checkboxInput(ns("sparse_index"), "Índice sparse (--sparse)", value = FALSE),
-              helpText("Reduce el uso de RAM durante la construcción del índice (~30-50%). Recomendado si el sistema tiene poca memoria.")
+              checkboxInput(ns("sparse_index"), "Sparse index (--sparse)", value = FALSE),
+              helpText("Reduces RAM usage during index construction (~30-50%). Recommended if the system has low memory.",
+                       tags$br(),
+                       tags$strong("Note: "),
+                       "uses a sparser hash table, making subsequent quantification",
+                       " slightly slower.")
             )
           )
         )
@@ -130,36 +163,36 @@ mod_references_server <- function(id, shared, volumes) {
     # ── Reactives for status display ───────────────────────
     output$fasta_status <- renderText({
       p <- parse_file(input$fasta_file)
-      if (is.null(p) || length(p) == 0) "No seleccionado"
-      else paste("Seleccionado:", basename(p))
+      if (is.null(p) || length(p) == 0) "Not selected"
+      else paste("Selected:", basename(p))
     })
 
     output$gtf_status <- renderText({
       p <- parse_file(input$gtf_file)
-      if (is.null(p) || length(p) == 0) "No seleccionado"
-      else paste("Seleccionado:", basename(p))
+      if (is.null(p) || length(p) == 0) "Not selected"
+      else paste("Selected:", basename(p))
     })
 
     output$adapter_status <- renderText({
       p <- parse_file(input$adapter_file)
-      if (is.null(p) || length(p) == 0) "Usando adaptadores por defecto"
-      else paste("Seleccionado:", basename(p))
+      if (is.null(p) || length(p) == 0) "Using default adapters"
+      else paste("Selected:", basename(p))
     })
 
     output$genome_status <- renderText({
       p <- parse_file(input$genome_file)
-      if (is.null(p) || length(p) == 0) "No seleccionado"
-      else paste("Seleccionado:", basename(p))
+      if (is.null(p) || length(p) == 0) "Not selected"
+      else paste("Selected:", basename(p))
     })
 
     output$index_dir_status <- renderText({
       p <- parse_dir(input$index_dir)
-      if (is.null(p) || length(p) == 0) "No seleccionado"
+      if (is.null(p) || length(p) == 0) "Not selected"
       else {
         # Check if it looks like a valid Salmon index
         has_info <- file.exists(file.path(p, "info.json"))
-        if (has_info) paste("Índice válido:", basename(p))
-        else paste("Directorio seleccionado (no se encontró info.json):", basename(p))
+        if (has_info) paste("Valid index:", basename(p))
+        else paste("Directory selected (info.json not found):", basename(p))
       }
     })
 
