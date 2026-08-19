@@ -4,6 +4,11 @@ A fully local, Dockerized **R Shiny** application for bulk RNA-seq analysis.
 
 **Pipeline:** FastQC → fastp → Salmon → tximport → MultiQC
 
+## Tutorial
+
+https://github.com/user-attachments/assets/a7072ae9-3d94-43aa-9d24-74ed035acb77
+
+
 ---
 
 ## Prerequisites
