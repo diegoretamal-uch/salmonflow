@@ -63,7 +63,7 @@ mod_results_ui <- function(id) {
             "SalmonFlow's count matrix can be analysed directly in ",
             tags$a(href = "https://github.com/gexijin/idepGolem",
                    target = "_blank", rel = "noopener", "iDEP"),
-            " for differential expression (DESeq2, limma, edgeR), clustering, PCA and pathway enrichment. ",
+            " for differential expression (DESeq2, limma-voom, limma-trend), clustering, PCA and pathway enrichment. ",
             "The exports below adapt the matrix to what iDEP expects: Ensembl version suffixes are removed so gene IDs map cleanly, ",
             "and values are rounded to whole counts."
           ),

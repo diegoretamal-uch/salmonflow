@@ -338,7 +338,8 @@ By default the scripts use these folders. You can also pass **any absolute path*
 ## Downstream Analysis with iDEP
 
 SalmonFlow stops at the count matrix. For differential expression (DESeq2,
-limma, edgeR), clustering and pathway enrichment, the Results tab hands off to
+limma-voom, limma-trend), clustering and pathway enrichment, the Results tab
+hands off to
 [**iDEP**](https://github.com/gexijin/idepGolem), which runs locally as a second
 container — no internet access is needed at analysis time.
 
@@ -395,7 +396,7 @@ The Results tab provides two purpose-built exports:
 
 | File | Contents |
 |------|----------|
-| `salmonflow_idep_counts_*.csv` | The count matrix with Ensembl version suffixes removed (`ENSG00000000003.16` → `ENSG00000000003`) and values rounded to whole counts, as DESeq2 and edgeR expect. Duplicate gene IDs created by stripping versions are collapsed by summing. |
+| `salmonflow_idep_counts_*.csv` | The count matrix with Ensembl version suffixes removed (`ENSG00000000003.16` → `ENSG00000000003`) and values rounded to whole counts, as DESeq2 expects. Duplicate gene IDs created by stripping versions are collapsed by summing. |
 | `salmonflow_idep_design_*.csv` | One row per sample with its **group**, taken from the group column of the Samples tab. Fill that column in before running if you want it populated. |
 
 Upload the count matrix first, then the design file, in iDEP's **Load Data**

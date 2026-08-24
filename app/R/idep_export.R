@@ -10,8 +10,8 @@
 #
 #   1. Gene IDs carry Ensembl/GENCODE version suffixes (ENSG…​.16),
 #      which lowers iDEP's gene ID -> Ensembl match rate.
-#   2. tximport values are non-integer, while DESeq2/edgeR inside
-#      iDEP expect counts.
+#   2. tximport values are non-integer, while DESeq2 inside iDEP
+#      expects integer counts.
 #
 # These helpers produce an iDEP-ready copy. The pipeline output
 # (merged_lengthScaledTPM.csv) is never modified.
