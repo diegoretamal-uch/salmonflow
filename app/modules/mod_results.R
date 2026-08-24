@@ -52,6 +52,50 @@ mod_results_ui <- function(id) {
     ),
 
     fluidRow(
+      column(12,
+        box(
+          title = tagList("Downstream Analysis — iDEP", html_tooltip("Export the count matrix in the format expected by iDEP, then open your local iDEP instance to run differential expression and pathway analysis.")),
+          status = "primary", solidHeader = FALSE, width = 12,
+          collapsible = TRUE,
+
+          tags$p(
+            style = "line-height: 1.6;",
+            "SalmonFlow's count matrix can be analysed directly in ",
+            tags$a(href = "https://github.com/gexijin/idepGolem",
+                   target = "_blank", rel = "noopener", "iDEP"),
+            " for differential expression (DESeq2, limma, edgeR), clustering, PCA and pathway enrichment. ",
+            "The exports below adapt the matrix to what iDEP expects: Ensembl version suffixes are removed so gene IDs map cleanly, ",
+            "and values are rounded to whole counts."
+          ),
+
+          tags$ol(
+            style = "line-height: 1.6;",
+            tags$li("Download both files below."),
+            tags$li("Click ", tags$strong("Open iDEP"), " — it opens in a new browser tab."),
+            tags$li("In iDEP's ", tags$strong("Load Data"), " tab, upload the count matrix, then the design file.")
+          ),
+
+          br(),
+
+          fluidRow(
+            column(8, uiOutput(ns("idep_exports"))),
+            column(4, uiOutput(ns("idep_link")))
+          ),
+
+          br(),
+          uiOutput(ns("idep_status")),
+
+          tags$p(
+            style = "color:#5a6373; font-size:11px; margin-top:10px;",
+            "iDEP is developed by the Ge lab at South Dakota State University and is free for non-commercial use (CC BY-NC 3.0). ",
+            tags$a(href = "https://doi.org/10.1186/s12859-018-2486-6",
+                   target = "_blank", rel = "noopener", "Ge, Son & Yao (2018), BMC Bioinformatics.")
+          )
+        )
+      )
+    ),
+
+    fluidRow(
       column(6,
         box(
           title = tagList("Salmon QC — Mapping Rates", html_tooltip("Summary of total processed reads, mapped reads, and percentage mapping rates for each sample.")),
@@ -96,6 +140,10 @@ mod_results_server <- function(id, shared) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # Host port the local iDEP container is published on. Read once at
+    # startup — it is set by docker-compose, not changed at runtime.
+    idep_port <- Sys.getenv("IDEP_PORT", "3839")
+
     # ── Count matrix table ─────────────────────────────────
     output$count_table <- renderDT({
       cm <- shared$count_matrix
@@ -132,6 +180,103 @@ mod_results_server <- function(id, shared) {
         write.table(shared$count_matrix, file, sep = "\t", row.names = FALSE, quote = FALSE)
       }
     )
+
+    # ── iDEP exports ───────────────────────────────────────
+    # Only offer the buttons once a run has produced a matrix, so a
+    # click can never hand the browser an empty file.
+    output$idep_exports <- renderUI({
+      if (is.null(shared$count_matrix)) {
+        return(tags$p(style = "color:#5a6373;",
+                      "Run the pipeline to enable the iDEP exports."))
+      }
+      tagList(
+        downloadButton(ns("download_idep_counts"), "Download iDEP Count Matrix",
+                       class = "btn-success"),
+        downloadButton(ns("download_idep_design"), "Download iDEP Design File",
+                       class = "btn-success", style = "margin-left:8px;")
+      )
+    })
+
+    output$download_idep_counts <- downloadHandler(
+      filename = function() {
+        paste0("salmonflow_idep_counts_", format(Sys.time(), "%Y%m%d_%H%M"), ".csv")
+      },
+      content = function(file) {
+        idep_counts <- prepare_idep_counts(shared$count_matrix)
+
+        if (is.null(idep_counts)) {
+          showNotification("No count matrix available yet — run the pipeline first.",
+                           type = "error")
+          return(NULL)
+        }
+
+        merged <- attr(idep_counts, "merged_ids") %||% 0
+        if (merged > 0) {
+          showNotification(
+            paste0("Removing Ensembl version suffixes collapsed ", merged,
+                   " duplicate gene ID(s); their counts were summed."),
+            type = "warning", duration = 10
+          )
+        }
+
+        write.csv(idep_counts, file, row.names = FALSE)
+      }
+    )
+
+    output$download_idep_design <- downloadHandler(
+      filename = function() {
+        paste0("salmonflow_idep_design_", format(Sys.time(), "%Y%m%d_%H%M"), ".csv")
+      },
+      content = function(file) {
+        design <- build_idep_design(shared$samples)
+
+        if (is.null(design)) {
+          showNotification("No samples loaded — nothing to export.", type = "error")
+          return(NULL)
+        }
+
+        if (!isTRUE(attr(design, "has_groups"))) {
+          showNotification(
+            paste("No groups were assigned in the Samples tab, so every sample is",
+                  "labelled 'Ungrouped'. Fill in the group column and re-export,",
+                  "or assign groups manually in iDEP."),
+            type = "warning", duration = 12
+          )
+        }
+
+        write.csv(design, file, row.names = FALSE)
+      }
+    )
+
+    # ── Open iDEP ──────────────────────────────────────────
+    # The href is built in the browser: this R process reaches iDEP at
+    # idep:3838 on the compose network, but the user's browser needs
+    # <same host as SalmonFlow>:3839. Deriving it from location.hostname
+    # works both on a laptop and on a lab server accessed by IP.
+    output$idep_link <- renderUI({
+      tags$a(
+        href = "#", class = "btn btn-primary",
+        onclick = sprintf(
+          "window.open(location.protocol + '//' + location.hostname + ':%s', '_blank', 'noopener'); return false;",
+          idep_port
+        ),
+        icon("external-link-alt"), " Open iDEP"
+      )
+    })
+
+    output$idep_status <- renderUI({
+      if (idep_reachable()) {
+        tags$p(style = "color:#66bb6a; font-size:12px;",
+               icon("check-circle"),
+               sprintf(" Local iDEP is running on port %s.", idep_port))
+      } else {
+        tags$p(style = "color:#5a6373; font-size:12px;",
+               icon("exclamation-triangle"),
+               " Could not reach a local iDEP instance. Start it with ",
+               tags$code("docker compose up -d idep"),
+               " (the first run downloads a large image). The button above still works if iDEP is running elsewhere.")
+      }
+    })
 
     # ── Salmon QC summary table ────────────────────────────
     output$salmon_qc_table <- renderDT({

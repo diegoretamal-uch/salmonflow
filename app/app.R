@@ -31,6 +31,7 @@ source("modules/mod_results.R")
 source("R/helpers.R")
 source("R/pipeline_functions.R")
 source("R/tximport_utils.R")
+source("R/idep_export.R")
 
 # ── Data directory roots (inside Docker) ─────────────────────
 DATA_INPUT  <- "/data/input"

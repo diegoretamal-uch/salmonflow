@@ -15,8 +15,26 @@ services:
       - ./data/tmp:/data/tmp
     environment:
       - SHINY_LOG_LEVEL=TRACE
+      - IDEP_PORT=3839
     command: >
       R -e "options(shiny.autoreload=TRUE);
             shiny::runApp('/srv/shiny-server/salmonflow',
                           host='0.0.0.0', port=3838)"
+    restart: unless-stopped
+
+  # Local iDEP for downstream differential expression and pathway
+  # analysis. Reached from the Results tab's "Open iDEP" button.
+  #
+  # No volumes: iDEP's input is a browser file picker, so it reads
+  # from the host filesystem the browser sees, not a container mount.
+  #
+  # The image bundles its own annotation database and is large — the
+  # first pull takes a while. Consider pinning to a digest
+  # (gexijin/idep@sha256:...) once pulled, since iDEP updates often.
+  idep:
+    image: gexijin/idep:latest
+    container_name: idep
+    ports:
+      - "3839:3838"        # 3838 is taken by salmonflow
+    pull_policy: missing   # don't re-pull tens of GB on every `up`
     restart: unless-stopped
