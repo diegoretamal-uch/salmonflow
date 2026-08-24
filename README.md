@@ -62,6 +62,165 @@ docker pull gexijin/idep:latest
 > **Note for Windows users:** if PowerShell blocks the script, run once:
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
+---
+
+## Updating an Existing Install
+
+Already running SalmonFlow from an earlier build? **Do not clone again** —
+update in place. Only two steps differ from a fresh install: you stop the old
+container first, and you `git pull` instead of `git clone`. Steps 3-5 are
+identical either way.
+
+### Linux / macOS
+
+```bash
+cd salmonflow
+
+# 1. Stop the running instance (it holds the app's port)
+docker rm -f salmonflow 2>/dev/null
+#    "No such container"? See "Finding an unnamed container" below.
+
+# 2. Get the new code
+git pull
+
+# 3. Rebuild — fast, only the app layer changed
+docker build -t salmonflow .
+
+# 4. One-time, if you want iDEP
+docker pull gexijin/idep:latest
+
+# 5. Run as usual
+./run.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+cd salmonflow
+
+docker rm -f salmonflow 2>$null
+git pull
+docker build -t salmonflow .
+docker pull gexijin/idep:latest
+.\run.ps1
+```
+
+**Why the rebuild is fast.** The `Dockerfile` itself rarely changes, so Docker
+reuses every cached layer and only re-copies `app/`. Seconds, not the ~10
+minutes of a first build — R and Bioconductor are not reinstalled.
+
+**Why step 1 matters.** An old container keeps the port bound, and the new one
+refuses to start with `Bind for 0.0.0.0:3838 failed: port is already
+allocated`.
+
+### Finding an unnamed container
+
+`run.sh` now starts its container as `salmonflow`, so `docker rm -f salmonflow`
+is all you need. But instances started by an **older `run.sh`**, or by a bare
+`docker run`, got a random name like `elastic_booth`. If step 1 said
+`No such container`, list what is running:
+
+```bash
+docker ps
+```
+
+```
+CONTAINER ID   IMAGE                 PORTS                        NAMES
+741e50aa2d16   salmonflow            0.0.0.0:3838->3838/tcp       vigorous_newton   <- yours
+3f8ec2d4c107   gexijin/idep:latest   0.0.0.0:3839->3838/tcp       idep              <- leave it
+```
+
+Find the row whose **IMAGE** is `salmonflow`, then remove it by the name in the
+last column:
+
+```bash
+docker rm -f vigorous_newton      # use the name YOU see, not this one
+```
+
+Match on the **IMAGE** column, not on the ports: both containers show `3838` on
+the right of their mapping, because that is the port *inside* every container.
+Only the `salmonflow` one should be removed — deleting `idep` just means
+pulling or restarting it again later.
+
+> For the same reason, do **not** hunt for it with
+> `docker ps --filter expose=3838` — that matches iDEP as well and would
+> remove it too.
+
+**Your data is safe.** Results live in bind-mounted host folders and no file
+format changed — nothing to migrate.
+
+**Old results won't appear automatically.** The Results tab reads the count
+matrix from the *current session*, so a freshly started app shows "Run the
+pipeline to enable the iDEP exports" even when `data/output/` is full. Use
+**Resume Analysis** in the Run tab — it skips every completed step and
+repopulates Results in a couple of minutes rather than re-running everything.
+
+---
+
+## Ports
+
+SalmonFlow uses **3838**, iDEP uses **3839**. Both are host-side choices you
+can change; inside the containers nothing moves.
+
+### Checking what is already in use
+
+```bash
+# Are our two ports taken? Empty output = both free.
+ss -tln 'sport = :3838 or sport = :3839'
+
+# Who owns them? (sudo required — Docker's listeners belong to root)
+sudo ss -tlnp 'sport = :3838 or sport = :3839'
+
+# Which of them are ours?
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}'
+```
+
+macOS has no `ss`; use `lsof -nP -iTCP:3838 -sTCP:LISTEN` instead.
+
+```powershell
+# Windows
+Get-NetTCPConnection -LocalPort 3838,3839 -State Listen -ErrorAction SilentlyContinue
+Get-Process -Id (Get-NetTCPConnection -LocalPort 3838).OwningProcess   # who owns it
+```
+
+Then read the result:
+
+| What you see | Meaning | What to do |
+|---|---|---|
+| Nothing | Port is free | Carry on |
+| Listed in **both** `ss` and `docker ps` | One of your own containers | `docker rm -f salmonflow` and reuse the port |
+| In `ss` but **not** in `docker ps` | Another program owns it — RStudio Server and Shiny Server both default to 3838 | Use a different port (below) |
+
+> Avoid `ss -tln | grep :3838`. The pattern also matches `:38380`, `:38381`
+> and so on, so an unrelated service can look like a conflict. The
+> `sport = :3838` filter above matches the port exactly.
+
+### Running on different ports
+
+```bash
+SALMONFLOW_PORT=8080 IDEP_PORT=8081 ./run.sh
+# → app at http://localhost:8080, iDEP at http://localhost:8081
+```
+
+```powershell
+$env:SALMONFLOW_PORT=8080; $env:IDEP_PORT=8081; .\run.ps1
+```
+
+To make it permanent, put the exports in your shell profile, or use
+`docker-compose.yml` and edit the `ports:` lines there.
+
+**The iDEP button keeps working.** The Results tab builds the iDEP URL from
+your browser's current hostname plus `IDEP_PORT`, so the two ports are
+independent — SalmonFlow on 8080 with iDEP on 3839 is fine. What matters is
+that `IDEP_PORT` matches the port iDEP is actually published on, which
+`run.sh` handles by passing the same value to both.
+
+> **Only the left number is yours to change.** In `-p 8080:3838` the left side
+> is the host port and the right side is the container's, which is always
+> 3838. Editing the right side breaks the app.
+
+---
+
 ### Live-reload (development, Linux/macOS)
 
 ```bash

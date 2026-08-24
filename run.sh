@@ -19,6 +19,10 @@ IDEP_IMAGE="${IDEP_IMAGE:-gexijin/idep:latest}"
 IDEP_PORT="${IDEP_PORT:-3839}"
 NETWORK="salmonflow-net"
 
+# Host ports. Override if either is already taken on this machine, e.g.
+#   SALMONFLOW_PORT=8080 IDEP_PORT=8081 ./run.sh
+SALMONFLOW_PORT="${SALMONFLOW_PORT:-3838}"
+
 # Create directories if they don't exist
 mkdir -p "$FASTQ_DIR" "$REF_DIR" "$OUT_DIR" "$(pwd)/data/tmp"
 
@@ -64,10 +68,13 @@ echo "  References: $REF_DIR"
 echo "  Output:     $OUT_DIR"
 echo "  iDEP:       $IDEP_STATUS"
 echo ""
-echo "  Starting... Open http://localhost:3838"
+echo "  Starting... Open http://localhost:${SALMONFLOW_PORT}"
 echo ""
 
-docker run --rm -p 3838:3838 \
+# Remove a stale container left by a previous crash, so --name is free.
+docker rm -f salmonflow >/dev/null 2>&1 || true
+
+docker run --rm --name salmonflow -p "${SALMONFLOW_PORT}:3838" \
   "${NET_ARGS[@]}" \
   -e "IDEP_PORT=${IDEP_PORT}" \
   -v "${FASTQ_DIR}:/data/input" \

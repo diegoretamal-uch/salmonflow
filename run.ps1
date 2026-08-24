@@ -16,6 +16,10 @@ $IdepImage = if ($env:IDEP_IMAGE) { $env:IDEP_IMAGE } else { "gexijin/idep:lates
 $IdepPort  = if ($env:IDEP_PORT)  { $env:IDEP_PORT }  else { "3839" }
 $Network   = "salmonflow-net"
 
+# Host ports. Override if either is already taken on this machine, e.g.
+#   $env:SALMONFLOW_PORT=8080; $env:IDEP_PORT=8081; .\run.ps1
+$AppPort = if ($env:SALMONFLOW_PORT) { $env:SALMONFLOW_PORT } else { "3838" }
+
 # Create directories if they don't exist
 New-Item -ItemType Directory -Force -Path $FastqDir  | Out-Null
 New-Item -ItemType Directory -Force -Path $RefDir    | Out-Null
@@ -71,10 +75,13 @@ Write-Host "  References: $RefDir"
 Write-Host "  Output:     $OutDir"
 Write-Host "  iDEP:       $IdepStatus"
 Write-Host ""
-Write-Host "  Starting... Open http://localhost:3838" -ForegroundColor Green
+Write-Host "  Starting... Open http://localhost:$AppPort" -ForegroundColor Green
 Write-Host ""
 
-docker run --rm -p 3838:3838 `
+# Remove a stale container left by a previous crash, so --name is free.
+docker rm -f salmonflow 2>&1 | Out-Null
+
+docker run --rm --name salmonflow -p "${AppPort}:3838" `
     @NetArgs `
     -e "IDEP_PORT=$IdepPort" `
     -v "${FastqDir}:/data/input" `
