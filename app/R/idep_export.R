@@ -5,13 +5,17 @@
 #
 # iDEP (https://github.com/gexijin/idepGolem) expects a gene-level
 # expression matrix with gene IDs in the first column and one column
-# per sample. SalmonFlow's matrix is already that shape, but two
-# details trip iDEP up:
+# per sample. SalmonFlow's matrix is already that shape; the only
+# adjustment made here is dropping the Ensembl/GENCODE version suffix
+# (ENSG…​.16), which can lower iDEP's gene ID -> Ensembl match rate.
 #
-#   1. Gene IDs carry Ensembl/GENCODE version suffixes (ENSG…​.16),
-#      which lowers iDEP's gene ID -> Ensembl match rate.
-#   2. tximport values are non-integer, while DESeq2 inside iDEP
-#      expects integer counts.
+# Values are passed through at full precision. iDEP accepts decimal
+# expression matrices — verified against a Galaxy-produced matrix
+# (30M library size, 30% non-integer values, versioned IDs) that runs
+# through iDEP successfully. DESeq2 itself needs integers, but iDEP
+# handles that internally, so rounding here would discard precision
+# without being required. round_counts is kept as an option but
+# defaults to FALSE and is deliberately not exposed in the UI.
 #
 # These helpers produce an iDEP-ready copy. The pipeline output
 # (merged_lengthScaledTPM.csv) is never modified.
@@ -21,13 +25,15 @@
 #' @param count_matrix data.frame — first column `gene_id`, then one
 #'   numeric column per sample (as produced by run_tximport()).
 #' @param strip_version Logical, drop Ensembl version suffixes.
-#' @param round_counts Logical, round values to whole numbers.
+#' @param round_counts Logical, round values to whole numbers. Off by
+#'   default: iDEP accepts decimals, so rounding would lose precision
+#'   for no gain. Not exposed in the UI.
 #' @return data.frame in the same shape, with attribute `merged_ids`
 #'   holding the number of rows collapsed by de-duplication, or NULL
 #'   if the input is empty.
 prepare_idep_counts <- function(count_matrix,
                                 strip_version = TRUE,
-                                round_counts  = TRUE) {
+                                round_counts  = FALSE) {
 
   if (is.null(count_matrix) || nrow(count_matrix) == 0) return(NULL)
   if (!"gene_id" %in% names(count_matrix)) return(NULL)

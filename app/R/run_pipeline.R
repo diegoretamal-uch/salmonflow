@@ -30,6 +30,8 @@ suppressPackageStartupMessages({
 source(file.path(script_dir, "helpers.R"))
 source(file.path(script_dir, "pipeline_functions.R"))
 source(file.path(script_dir, "tximport_utils.R"))
+source(file.path(script_dir, "resource_planner.R"))
+source(file.path(script_dir, "cpu_monitor.R"))
 
 # ── Load params ───────────────────────────────────────────────
 p <- jsonlite::fromJSON(params_file, simplifyDataFrame = TRUE)
@@ -127,6 +129,18 @@ remove_trimmed <- function(trimmed_path, quant_sf_path) {
 is_se       <- isTRUE(p$lib_type_se)
 mode        <- if (is_se) "SE" else "PE"
 threads     <- as.integer(p$salmon_threads %||% 4L)
+
+# ── Thread budget ─────────────────────────────────────────────
+# `threads` is what the user asked for. It is never passed verbatim to every
+# tool any more: FastQC can only use one core per file, fastp plateaus well
+# below the slider's range, and only salmon consumes the whole budget. Clamp
+# the request to what is genuinely available (cgroup quotas included) so a
+# container CPU limit is not silently oversubscribed.
+detected_cores <- detect_available_cores()
+if (!is.na(detected_cores) && detected_cores > 0 && threads > detected_cores) {
+  threads <- as.integer(detected_cores)
+}
+available_ram  <- detect_available_ram()
 output_dir  <- as.character(p$output_dir)
 trim_dir    <- file.path(output_dir, "trimmed")
 fastqc_dir  <- file.path(output_dir, "fastqc_pre")
@@ -164,6 +178,12 @@ step <- 0L
 
 write_log("=== SalmonFlow Pipeline started ===", "info")
 write_log(paste("Samples:", n_samples, "| Mode:", mode), "info")
+
+# Start the resource sampler before any tool runs, so every stage below has a
+# timeline to be measured against. It is a background bash loop: nothing here
+# can sample while processx::run() has the R thread parked inside a tool.
+cpu_csv <- file.path(output_dir, "cpu_usage.csv")
+start_cpu_sampler(cpu_csv, log_callback = write_log)
 if (resume) write_log("RESUME mode active — steps with previous results will be skipped", "info")
 write_state(step, total, TRUE)
 
@@ -180,13 +200,67 @@ fastqc_pre_done <- resume && all(sapply(all_fastqs, function(f) {
   file.exists(file.path(fastqc_dir, paste0(fastqc_stem(f), "_fastqc.zip")))
 }))
 
+# FastQC (pre) and the index build touch no common files: one reads the input
+# FASTQs and writes small zips, the other reads the reference FASTA and writes
+# the index. Start FastQC without blocking and join it after the build.
+#
+# The overlap is gated on memory, not disk. A decoy-aware index build has a
+# large working set, and FastQC's launcher sizes the JVM heap as
+# (memory x threads), so cap the heap before putting a JVM beside it. If no
+# headroom can be established, fall back to running the two in sequence.
+fq_pre_handle  <- NULL
+fq_pre_cpu     <- NULL
+fq_pre_blocked <- FALSE
+
 if (fastqc_pre_done) {
   write_log("FastQC (pre-trimming): skipped (previous results found)", "info")
 } else {
-  run_fastqc(all_fastqs, fastqc_dir, threads = threads, log_callback = write_log)
+  fq_pre_plan    <- fastqc_plan(length(all_fastqs), threads, available_ram)
+  fq_pre_threads <- fq_pre_plan$threads
+  fq_pre_mem     <- fq_pre_plan$memory_mb
+
+  # Only overlap when there is an index build to overlap with.
+  if (isTRUE(p$build_new_index)) {
+    if (is.na(available_ram)) {
+      write_log(paste("FastQC (pre-trimming): RAM headroom unknown —",
+                      "running before the index build"), "info")
+      fq_pre_blocked <- TRUE
+    } else {
+      fq_pre_handle <- start_fastqc(all_fastqs, fastqc_dir,
+                                    threads   = fq_pre_threads,
+                                    memory_mb = fq_pre_mem,
+                                    label     = "FastQC (pre)",
+                                    log_callback = write_log)
+      if (is.null(fq_pre_handle)) {
+        fq_pre_blocked <- TRUE
+      } else {
+        # Measured across the background run; closed in join_fq_pre().
+        fq_pre_cpu <- cpu_block_start("FastQC (pre)", fq_pre_threads)
+      }
+    }
+  } else {
+    fq_pre_blocked <- TRUE
+  }
+
+  if (fq_pre_blocked) {
+    with_cpu_block("FastQC (pre)", fq_pre_threads, write_log,
+      run_fastqc(all_fastqs, fastqc_dir, threads = fq_pre_threads,
+                 memory_mb = fq_pre_mem, label = "FastQC (pre)",
+                 log_callback = write_log))
+  }
 }
 step <- step + 1L
 write_state(step, total, TRUE)
+
+# Join the background FastQC (pre) exactly once, on every exit path.
+join_fq_pre <- function() {
+  if (is.null(fq_pre_handle)) return(invisible(NULL))
+  finish_fastqc(fq_pre_handle, log_callback = write_log)
+  cpu_block_end(fq_pre_cpu, write_log)
+  fq_pre_cpu    <<- NULL
+  fq_pre_handle <<- NULL
+  invisible(NULL)
+}
 
 # ── STEP 2: Salmon index ─────────────────────────────────────
 if (isTRUE(p$build_new_index)) {
@@ -200,17 +274,20 @@ if (isTRUE(p$build_new_index)) {
       gf <- p$genome_fasta %||% ""; if (nchar(gf) > 0) gf else NULL
     } else NULL
 
-    idx_result <- build_salmon_index(
-      fasta        = as.character(p$transcriptome_fasta),
-      outdir       = index_dir,
-      decoy        = decoy_file,
-      kmer         = as.integer(p$kmer_size %||% 31L),
-      threads      = threads,
-      sparse       = isTRUE(p$sparse_index),
-      log_callback = write_log
-    )
+    idx_result <- with_cpu_block("Salmon index", threads, write_log,
+      build_salmon_index(
+        fasta        = as.character(p$transcriptome_fasta),
+        outdir       = index_dir,
+        decoy        = decoy_file,
+        kmer         = as.integer(p$kmer_size %||% 31L),
+        threads      = threads,
+        sparse       = isTRUE(p$sparse_index),
+        log_callback = write_log
+      ))
 
     if (idx_result$exit_status != 0) {
+      join_fq_pre()   # never abandon a running FastQC
+      stop_cpu_sampler(write_log)
       write_log("Pipeline aborted: error building index", "error")
       write_state(step, total, FALSE)
       quit(status = 1, save = "no")
@@ -223,6 +300,10 @@ if (isTRUE(p$build_new_index)) {
   write_log("-- Step 2: Salmon Index (using existing) --", "info")
 }
 
+# Barrier: FastQC (pre) must be finished before the per-sample loop starts,
+# so its cores are free and MultiQC later sees a complete fastqc_pre/.
+join_fq_pre()
+
 # ── STEP 3: Merged Per-Sample Loop (trim + FastQC post + quant) ──
 write_log("-- Step 3: Per-Sample Processing (trimming, FastQC post, Salmon quant) --", "info")
 salmon_metas <- list()
@@ -231,6 +312,11 @@ for (i in seq_len(n_samples)) {
   sname <- sample_names[i]
   sample_status[sname] <- "running"
   write_state(step, total, TRUE)
+
+  # Reset per iteration so a skipped sample can never inherit the previous
+  # sample's handle and join it twice.
+  fq_post_handle <- NULL
+  fq_post_cpu    <- NULL
 
   # Define output paths for this sample
   r1_trimmed <- file.path(trim_dir, paste0(sname, if (is_se) "_trimmed.fastq.gz" else "_R1_trimmed.fastq.gz"))
@@ -271,7 +357,12 @@ for (i in seq_len(n_samples)) {
         v <- samples$r2[i]; if (is.na(v) || nchar(v) == 0) NULL else v
       }
 
-      trim_result <- run_fastp(
+      # fastp's scaling goes flat well below the slider's range, and it
+      # hard-caps at 16 internally anyway.
+      fp_threads <- fastp_threads(threads)
+
+      trim_result <- with_cpu_block(paste("fastp", sname), fp_threads, write_log,
+        run_fastp(
         r1                = samples$r1[i],
         r2                = r2_val,
         out_dir           = trim_dir,
@@ -283,9 +374,9 @@ for (i in seq_len(n_samples)) {
         cut_right_quality = as.numeric(p$fastp_cut_right   %||% 20),
         window_size       = as.integer(p$fastp_window_size %||% 4L),
         minlen            = as.integer(p$fastp_minlen      %||% 36L),
-        threads           = threads,
+        threads           = fp_threads,
         log_callback      = write_log
-      )
+      ))
 
       if (trim_result$exit_status != 0) {
         sample_status[sname] <- "error"
@@ -311,7 +402,32 @@ for (i in seq_len(n_samples)) {
     if (fastqc_post_sample_done) {
       write_log(paste("FastQC (post-trimming):", sname, "— skipped (previous results found)"), "info")
     } else {
-      run_fastqc(fq_trimmed, fastqc_post_dir, threads = threads, log_callback = write_log)
+      # Start FastQC now and let Salmon quant run alongside it. Both only
+      # READ the trimmed FASTQs and write to disjoint output directories, so
+      # there is no data dependency between them — they were serial only
+      # because processx::run() blocks. The join below is what keeps this
+      # storage-neutral: the trimmed files are still deleted the moment both
+      # consumers are done, so the peak footprint is unchanged.
+      fq_post_plan    <- fastqc_plan(length(fq_trimmed), threads, available_ram)
+      fq_post_threads <- fq_post_plan$threads
+      fq_post_handle  <- start_fastqc(
+        fq_trimmed, fastqc_post_dir,
+        threads      = fq_post_threads,
+        memory_mb    = fq_post_plan$memory_mb,
+        label        = paste0("FastQC (post ", sname, ")"),
+        log_callback = write_log)
+      # Spawn failure falls back to running it inline, before quant.
+      if (is.null(fq_post_handle)) {
+        with_cpu_block(paste0("FastQC (post ", sname, ")"), fq_post_threads, write_log,
+          run_fastqc(fq_trimmed, fastqc_post_dir, threads = fq_post_threads,
+                     memory_mb = fq_post_plan$memory_mb,
+                     label = paste0("FastQC (post ", sname, ")"),
+                     log_callback = write_log))
+      } else {
+        # Measured across the overlap with quant; closed at the barrier below.
+        fq_post_cpu <- cpu_block_start(paste0("FastQC (post ", sname, ")"),
+                                       fq_post_threads)
+      }
     }
   }
 
@@ -325,29 +441,54 @@ for (i in seq_len(n_samples)) {
     }
   }
 
-  quant_result <- run_salmon_quant(
-    index_dir       = index_dir,
-    r1              = r1_input,
-    r2              = r2_input,
-    outdir          = quant_dir,
-    sample_name     = sname,
-    lib_type        = as.character(p$salmon_libtype  %||% "A"),
-    gc_bias         = isTRUE(p$salmon_gcbias),
-    seq_bias        = isTRUE(p$salmon_seqbias),
-    threads         = threads,
-    is_se           = is_se,
-    validate        = isTRUE(p$salmon_validate),
-    bootstraps      = as.integer(p$salmon_bootstraps    %||% 0L),
-    min_score_frac  = as.numeric(p$salmon_min_score_frac %||% 0.65),
-    discard_orphans = isTRUE(p$salmon_discard_orphans),
-    log_callback    = write_log
-  )
+  # Leave the concurrent FastQC its cores; it needs exactly one per file.
+  quant_threads <- salmon_quant_threads(
+                     threads,
+                     reserved = if (is.null(fq_post_handle)) 0L
+                                else fq_post_handle$n_files)
+
+  quant_result <- with_cpu_block(paste("Salmon quant", sname), quant_threads, write_log,
+    run_salmon_quant(
+      index_dir       = index_dir,
+      r1              = r1_input,
+      r2              = r2_input,
+      outdir          = quant_dir,
+      sample_name     = sname,
+      lib_type        = as.character(p$salmon_libtype  %||% "A"),
+      gc_bias         = isTRUE(p$salmon_gcbias),
+      seq_bias        = isTRUE(p$salmon_seqbias),
+      threads         = quant_threads,
+      is_se           = is_se,
+      validate        = isTRUE(p$salmon_validate),
+      bootstraps      = as.integer(p$salmon_bootstraps    %||% 0L),
+      min_score_frac  = as.numeric(p$salmon_min_score_frac %||% 0.65),
+      discard_orphans = isTRUE(p$salmon_discard_orphans),
+      log_callback    = write_log
+    ))
+
+  # ── BARRIER ──────────────────────────────────────────────────
+  # Join the background FastQC before anything below can delete the trimmed
+  # FASTQs it is reading. Unconditional and ahead of the status check, so a
+  # failed quant still reaps the process instead of leaking it into the next
+  # sample, where it would compete for cores.
+  fq_post_status <- finish_fastqc(fq_post_handle, log_callback = write_log)
+  cpu_block_end(fq_post_cpu, write_log)
+  fq_post_cpu <- NULL
+  if (!is.null(fq_post_handle) && !identical(as.integer(fq_post_status), 0L)) {
+    # Previously this failure was silent: run_fastqc()'s return value was
+    # discarded. Surface it without failing the sample — quantification does
+    # not depend on QC output.
+    write_log(paste("FastQC (post-trimming):", sname,
+                    "did not complete cleanly; its report may be missing"), "warn")
+  }
+  fq_post_handle <- NULL
 
   if (quant_result$exit_status == 0) {
     sample_status[sname] <- "done"
     salmon_metas[[sname]] <- quant_result$meta
 
-    # Optionally free disk by removing the trimmed FASTQs once quant succeeds
+    # Optionally free disk by removing the trimmed FASTQs once quant succeeds.
+    # Safe here only because the barrier above guarantees FastQC is done.
     if (isTRUE(p$trimming_enabled)) {
       remove_trimmed(r1_trimmed, quant_sf)
       if (!is_se) remove_trimmed(r2_trimmed, quant_sf)
@@ -367,22 +508,25 @@ writeLines(jsonlite::toJSON(salmon_metas, auto_unbox = TRUE), salmon_meta_path)
 # ── STEP 4: tximport ─────────────────────────────────────────
 write_log("-- Step 4: tximport --", "info")
 
-tx2gene <- build_tx2gene(as.character(p$gtf_path), log_callback = write_log)
+tx2gene <- with_cpu_block("tx2gene (GTF parse)", 1L, write_log,
+  build_tx2gene(as.character(p$gtf_path), log_callback = write_log))
 if (is.null(tx2gene)) {
+  stop_cpu_sampler(write_log)
   write_log("Pipeline aborted: error building tx2gene", "error")
   write_state(step, total, FALSE)
   quit(status = 1, save = "no")
 }
 
-run_tximport(
-  quant_dir         = quant_dir,
-  sample_names      = sample_names,
-  tx2gene           = tx2gene,
-  method            = as.character(p$txi_method         %||% "lengthScaledTPM"),
-  ignore_tx_version = isTRUE(p$txi_ignore_version),
-  output_dir        = output_dir,
-  log_callback      = write_log
-)
+with_cpu_block("tximport", 1L, write_log,
+  run_tximport(
+    quant_dir         = quant_dir,
+    sample_names      = sample_names,
+    tx2gene           = tx2gene,
+    method            = as.character(p$txi_method         %||% "lengthScaledTPM"),
+    ignore_tx_version = isTRUE(p$txi_ignore_version),
+    output_dir        = output_dir,
+    log_callback      = write_log
+  ))
 
 step <- step + 1L
 count_matrix_path <- file.path(output_dir, "merged_lengthScaledTPM.csv")
@@ -454,8 +598,11 @@ write_run_summary <- function(multiqc = list()) {
     }
   }
 
+  L <- c(L, cpu_summary_lines(run_start))
+
   L <- c(L, "", "-- Outputs --",
          paste0("Count matrix: ", count_matrix_path))
+  if (file.exists(cpu_csv)) L <- c(L, paste0("CPU timeline: ", cpu_csv))
   for (nm in names(multiqc)) {
     if (nchar(multiqc[[nm]]) > 0) L <- c(L, paste0(nm, ": ", multiqc[[nm]]))
   }
@@ -474,12 +621,14 @@ write_run_summary <- function(multiqc = list()) {
 # ── STEP 5: MultiQC ──────────────────────────────────────────
 if (isTRUE(p$trimming_enabled)) {
   write_log("-- Step 5a: MultiQC (pre-trimming) --", "info")
-  run_multiqc(c(fastqc_dir, trim_dir), multiqc_pre_dir, log_callback = write_log)
+  with_cpu_block("MultiQC (pre-trimming)", 1L, write_log,
+    run_multiqc(c(fastqc_dir, trim_dir), multiqc_pre_dir, log_callback = write_log))
   step <- step + 1L
   write_state(step, total, TRUE)
 
   write_log("-- Step 5b: MultiQC (post-trimming) --", "info")
-  run_multiqc(c(fastqc_post_dir, quant_dir), multiqc_post_dir, log_callback = write_log)
+  with_cpu_block("MultiQC (post-trimming)", 1L, write_log,
+    run_multiqc(c(fastqc_post_dir, quant_dir), multiqc_post_dir, log_callback = write_log))
   step <- step + 1L
 
   multiqc_pre_report_path  <- file.path(multiqc_pre_dir,  "multiqc_report.html")
@@ -487,6 +636,7 @@ if (isTRUE(p$trimming_enabled)) {
   if (!file.exists(multiqc_pre_report_path))  multiqc_pre_report_path  <- ""
   if (!file.exists(multiqc_post_report_path)) multiqc_post_report_path <- ""
 
+  stop_cpu_sampler(write_log)
   summary_out <- write_run_summary(list(
     "MultiQC (pre-trimming)"  = multiqc_pre_report_path,
     "MultiQC (post-trimming)" = multiqc_post_report_path))
@@ -500,12 +650,14 @@ if (isTRUE(p$trimming_enabled)) {
               summary_path             = summary_out)
 } else {
   write_log("-- Step 5: MultiQC --", "info")
-  run_multiqc(output_dir, multiqc_dir, log_callback = write_log)
+  with_cpu_block("MultiQC", 1L, write_log,
+    run_multiqc(output_dir, multiqc_dir, log_callback = write_log))
   step <- step + 1L
 
   multiqc_report_path <- file.path(multiqc_dir, "multiqc_report.html")
   if (!file.exists(multiqc_report_path)) multiqc_report_path <- ""
 
+  stop_cpu_sampler(write_log)
   summary_out <- write_run_summary(list("MultiQC report" = multiqc_report_path))
 
   write_log("=== Pipeline completed successfully ===", "success")

@@ -8,7 +8,13 @@ mod_params_ui <- function(id) {
 
   # Recommend threads based on the host machine: use all detected cores
   # but leave 1 free for the OS / UI. Falls back to 4 if detection fails.
-  n_cores      <- tryCatch(parallel::detectCores(), error = function(e) NA_integer_)
+  # detect_available_cores() takes the min of the host count and any cgroup
+  # CPU quota, so a `docker run --cpus` limit or a scheduler allocation is not
+  # silently oversubscribed. Falls back to detectCores() when unavailable.
+  n_cores      <- tryCatch(detect_available_cores(), error = function(e) NA_integer_)
+  if (is.na(n_cores)) {
+    n_cores <- tryCatch(parallel::detectCores(), error = function(e) NA_integer_)
+  }
   rec_threads  <- if (is.na(n_cores) || n_cores < 1) 4L else max(1L, min(32L, n_cores - 1L))
 
   tagList(
@@ -130,8 +136,11 @@ mod_params_ui <- function(id) {
             if (is.na(n_cores)) {
               "Could not detect the number of system cores; using 4 by default."
             } else {
-              sprintf(paste("System with %d cores detected.",
-                            "Recommended: %d (leaves 1 free for the system)."),
+              sprintf(paste("System with %d usable CPUs detected (container",
+                            "limits included). Recommended: %d.",
+                            "Tools that cannot use this many \u2014 FastQC, which",
+                            "runs one core per file, and fastp \u2014 are given",
+                            "smaller budgets automatically."),
                       n_cores, rec_threads)
             }
           )

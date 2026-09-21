@@ -123,6 +123,35 @@ mod_run_server <- function(id, shared) {
                tags$strong("Threads: "), shared$salmon_threads),
         tags$p(tags$strong("tximport: "), shared$txi_method, " | ",
                tags$strong("Ignore version: "), ifelse(shared$txi_ignore_version, "Yes", "No")),
+
+        # ── Projected peak sample storage ──────────────────────
+        # Counts sample FASTQs only; indexes, QC reports and caches are
+        # auxiliary and excluded. Shown before launch so the storage policy
+        # chosen on the Parameters tab has a visible consequence.
+        if (n_samples > 0) {
+          policy <- if (isTRUE(shared$delete_originals_after_trim)) {
+            "delete_raw"
+          } else if (isTRUE(shared$delete_trimmed_after_quant)) {
+            "delete_trimmed"
+          } else {
+            "keep_both"
+          }
+          proj <- project_peak_storage(samples, policy,
+                                       trimming_enabled = isTRUE(shared$trimming_enabled))
+          free <- detect_free_disk(shared$output_dir %||% "/data/output")
+          tight <- !is.na(free) && proj$peak > free
+
+          tags$p(
+            style = if (tight) "color:#a94442;" else NULL,
+            if (tight) icon("triangle-exclamation"),
+            tags$strong(" Projected peak sample storage: "), fmt_bytes(proj$peak),
+            " (raw ", fmt_bytes(proj$raw), " — ", proj$limiting, ")",
+            tags$br(),
+            tags$strong("Free on output volume: "),
+            if (is.na(free)) "unknown" else fmt_bytes(free),
+            if (tight) tags$strong(" — projected peak exceeds free space")
+          )
+        },
         if (isTRUE(shared$delete_originals_after_trim)) {
           tags$p(style = "color:#a94442;",
                  icon("triangle-exclamation"),

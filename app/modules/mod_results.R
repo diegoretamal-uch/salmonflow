@@ -65,7 +65,7 @@ mod_results_ui <- function(id) {
                    target = "_blank", rel = "noopener", "iDEP"),
             " for differential expression (DESeq2, limma-voom, limma-trend), clustering, PCA and pathway enrichment. ",
             "The exports below adapt the matrix to what iDEP expects: Ensembl version suffixes are removed so gene IDs map cleanly, ",
-            "and values are rounded to whole counts."
+            "and expression values are passed through at full precision."
           ),
 
           tags$ol(

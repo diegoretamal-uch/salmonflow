@@ -17,37 +17,96 @@ detect_gencode_fasta <- function(fasta_path) {
   }, error = function(e) FALSE)
 }
 
-#' Run FastQC on a set of FASTQ files
+#' Build the FastQC argument vector shared by the blocking and async paths
 #' @param files Character vector of FASTQ file paths
 #' @param outdir Output directory for FastQC results
-#' @param threads Number of threads
-#' @param log_callback Function(msg, type) for live logging
-#' @return List with exit_status and outdir
-run_fastqc <- function(files, outdir, threads = 4, log_callback = NULL) {
-  dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
-
-  if (!is.null(log_callback)) log_callback("FastQC: starting analysis...", "info")
-
+#' @param threads Number of files to process simultaneously (see below)
+#' @param memory_mb Optional --memory value in MB per thread (NA = launcher default)
+#'
+#' FastQC's --threads is a *file* count, not cores-per-file: AnalysisQueue
+#' starts one thread per AnalysisRunner and each AnalysisRunner owns exactly
+#' one SequenceFile. Passing more than length(files) buys nothing and inflates
+#' the JVM heap, which the launcher sizes as (memory x threads).
+fastqc_args <- function(files, outdir, threads, memory_mb = NA_integer_) {
   args <- c(files, "--outdir", outdir, "--threads", as.character(threads))
+  if (!is.na(memory_mb)) args <- c(args, "--memory", as.character(memory_mb))
+  args
+}
 
-  result <- processx::run("fastqc", args = args, echo = FALSE,
-                          error_on_status = FALSE,
-                          stdout_line_callback = function(line, proc) {
-                            if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
-                          },
-                          stderr_line_callback = function(line, proc) {
-                            if (!is.null(log_callback)) log_callback(paste("FastQC:", line), "info")
-                          })
+#' Start FastQC without blocking, returning a handle to join later.
+#'
+#' Output is redirected to a file rather than streamed through line callbacks:
+#' processx's *_line_callback only fires inside the blocking event loop of
+#' processx::run(), and replaying at the join keeps FastQC's progress lines
+#' from interleaving with whatever runs alongside it.
+#'
+#' @return Handle list(proc, out_file, label), or NULL if the spawn failed.
+start_fastqc <- function(files, outdir, threads = 2, memory_mb = NA_integer_,
+                         label = "FastQC", log_callback = NULL) {
+  dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+  out <- tempfile(fileext = ".fastqc.log")
+
+  proc <- tryCatch(
+    processx::process$new("fastqc",
+                          args   = fastqc_args(files, outdir, threads, memory_mb),
+                          stdout = out, stderr = "2>&1"),
+    error = function(e) {
+      if (!is.null(log_callback)) {
+        log_callback(paste0(label, ": failed to start — ", conditionMessage(e)), "error")
+      }
+      NULL
+    })
+
+  if (is.null(proc)) return(NULL)
 
   if (!is.null(log_callback)) {
-    if (identical(result$status, 0L) || identical(result$status, 0)) {
-      log_callback("FastQC: completed", "success")
+    log_callback(sprintf("%s: started in background (%d file(s), %d thread(s))",
+                         label, length(files), threads), "info")
+  }
+  list(proc = proc, out_file = out, label = label, n_files = length(files))
+}
+
+#' Wait for a start_fastqc() handle, replay its output, return its exit status.
+#'
+#' Safe to call with NULL (a skipped or failed-to-start run) and safe to call
+#' more than once. Must be called on every path out of a sample iteration,
+#' including failures, or a FastQC process leaks into the next sample; and it
+#' must be called before any deletion of the files FastQC is reading.
+finish_fastqc <- function(handle, log_callback = NULL) {
+  if (is.null(handle)) return(invisible(1L))
+
+  handle$proc$wait()
+  status <- tryCatch(handle$proc$get_exit_status(), error = function(e) NA_integer_)
+
+  if (!is.null(log_callback) && file.exists(handle$out_file)) {
+    lines <- tryCatch(readLines(handle$out_file, warn = FALSE),
+                      error = function(e) character(0))
+    for (l in lines) {
+      if (nzchar(trimws(l))) log_callback(paste0(handle$label, ": ", l), "info")
+    }
+  }
+  unlink(handle$out_file)
+
+  if (!is.null(log_callback)) {
+    if (identical(status, 0L)) {
+      log_callback(paste0(handle$label, ": completed"), "success")
     } else {
-      log_callback(paste("FastQC: failed with exit code", result$status), "error")
+      log_callback(paste0(handle$label, ": failed with exit code ", status), "error")
     }
   }
 
-  list(exit_status = result$status %||% 1, outdir = outdir)
+  invisible(if (is.na(status)) 1L else status)
+}
+
+#' Run FastQC and block until it finishes.
+#' Thin wrapper over the start/join pair so both paths share one code path.
+#' @return List with exit_status and outdir
+run_fastqc <- function(files, outdir, threads = 4, memory_mb = NA_integer_,
+                       label = "FastQC", log_callback = NULL) {
+  handle <- start_fastqc(files, outdir, threads = threads, memory_mb = memory_mb,
+                         label = label, log_callback = log_callback)
+  status <- finish_fastqc(handle, log_callback = log_callback)
+  list(exit_status = status, outdir = outdir)
 }
 
 #' Run fastp on a single sample

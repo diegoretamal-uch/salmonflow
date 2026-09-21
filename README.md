@@ -274,7 +274,7 @@ By default the scripts use these folders. You can also pass **any absolute path*
 |-------------|-----------------|-------------------------------------------|
 | Salmon      | 1.10.0          | Quasi-mapping quantification              |
 | FastQC      | 0.12.1          | Pre-trimming QC                           |
-| fastp       | apt (≥ 0.23)    | Adapter trimming and quality filtering    |
+| fastp       | 1.3.6           | Adapter trimming and quality filtering    |
 | MultiQC     | 1.34            | Aggregated QC report                      |
 | R           | 4.4.1           | Shiny runtime                             |
 | Bioconductor| 3.19            | Bioinformatics package ecosystem          |
@@ -322,6 +322,39 @@ By default the scripts use these folders. You can also pass **any absolute path*
 4. **Salmon quant** — quasi-mapping quantification per sample
 5. **tximport** — merge per-sample quant.sf into a gene-level count matrix
 6. **MultiQC** — aggregate FastQC + fastp + Salmon reports into one HTML
+
+---
+
+## Resource Usage
+
+Every stage records how much CPU and RAM it actually used, so the thread
+budget the app hands out can be checked against what the tools did with it.
+
+A line per stage appears in the live log as it finishes:
+
+```
+CPU  Salmon quant CTRL1: 6.8 cores avg, 7.9 peak, of 7 allocated (97%), peak RAM 4.6 GB, 4m 12s
+```
+
+The same figures are collected into a `-- Resource usage --` table in
+`run_summary.log`, and the raw timeline is written to `cpu_usage.csv`
+(`epoch, cpu_usec, mem_bytes, source`) in the output directory for plotting.
+
+How to read it:
+
+- **Avg cores vs Alloc** is the useful ratio. Well under 100% means the stage
+  could not use the threads it was given — expected for FastQC (one core per
+  file) and fastp (flat past 8), not for Salmon.
+- **`*`** marks a stage that overlapped another. FastQC runs alongside Salmon
+  quant by design, so the CPU they shared is counted in both rows and each can
+  read above 100%.
+- Figures are **container-scoped** where a cgroup is visible, which is the
+  normal Docker case. Outside a container they cover the whole machine and are
+  labelled `(host-wide)`.
+- Stages shorter than 5 s are listed as `n/a`: too brief to sample.
+
+Sampling is a small bash loop writing a counter every 2 seconds, started and
+stopped by the runner. If it cannot start, the run proceeds without the lines.
 
 ---
 
@@ -396,7 +429,7 @@ The Results tab provides two purpose-built exports:
 
 | File | Contents |
 |------|----------|
-| `salmonflow_idep_counts_*.csv` | The count matrix with Ensembl version suffixes removed (`ENSG00000000003.16` → `ENSG00000000003`) and values rounded to whole counts, as DESeq2 expects. Duplicate gene IDs created by stripping versions are collapsed by summing. |
+| `salmonflow_idep_counts_*.csv` | The count matrix with Ensembl version suffixes removed (`ENSG00000000003.16` → `ENSG00000000003`), which improves iDEP's gene ID matching. Expression values are passed through unchanged, at full precision — iDEP accepts decimal matrices, so nothing is rounded. Duplicate gene IDs created by stripping versions are collapsed by summing. |
 | `salmonflow_idep_design_*.csv` | One row per sample with its **group**, taken from the group column of the Samples tab. Fill that column in before running if you want it populated. |
 
 Upload the count matrix first, then the design file, in iDEP's **Load Data**
