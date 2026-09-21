@@ -3,10 +3,16 @@ FROM bioconductor/bioconductor_docker:RELEASE_3_19
 LABEL maintainer="SalmonFlow" \
       description="Dockerized R Shiny app for bulk RNA-seq analysis"
 
-# ── Extra system dependencies (wget/unzip for Salmon & FastQC) ───────
+# ── Extra system dependencies (wget/unzip for Salmon, FastQC & fastp) ─
 RUN apt-get update && apt-get install -y \
-    wget curl unzip fastp \
+    wget curl unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# ── fastp 1.3.6 (upstream static binary, checksum-verified) ─────────
+RUN wget -q -O /usr/local/bin/fastp http://opengene.org/fastp/fastp.1.3.6 \
+    && echo "817df51647ecdacc1642daabe2438c744828ccda2d3634d90395ea91e3a7bc1f  /usr/local/bin/fastp" | sha256sum -c - \
+    && chmod +x /usr/local/bin/fastp \
+    && fastp --version 2>&1 | grep -q "1.3.6"
 
 # ── Salmon 1.10.0 ───────────────────────────────────────────────────
 RUN wget -q https://github.com/COMBINE-lab/salmon/releases/download/v1.10.0/salmon-1.10.0_linux_x86_64.tar.gz \
