@@ -28,13 +28,15 @@ services:
   # No volumes: iDEP's input is a browser file picker, so it reads
   # from the host filesystem the browser sees, not a container mount.
   #
-  # The image bundles its own annotation database and is large — the
-  # first pull takes a while. Consider pinning to a digest
-  # (gexijin/idep@sha256:...) once pulled, since iDEP updates often.
+  # Built from idep/Dockerfile: the gexijin/idep 2.4.2 image (pinned by
+  # digest) with a patched idepGolem that adds a "Full DESeq2 results"
+  # download (lfcSE, Wald stat). The base bundles its own annotation
+  # database and is large; pull it once with `docker pull
+  # gexijin/idep:latest` before the first build.
   idep:
-    image: gexijin/idep:latest
+    build: ./idep
+    image: salmonflow-idep:latest
     container_name: idep
     ports:
       - "3839:3838"        # 3838 is taken by salmonflow
-    pull_policy: missing   # don't re-pull tens of GB on every `up`
     restart: unless-stopped

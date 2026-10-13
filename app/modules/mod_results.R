@@ -72,7 +72,10 @@ mod_results_ui <- function(id) {
             style = "line-height: 1.6;",
             tags$li("Download both files below."),
             tags$li("Click ", tags$strong("Open iDEP"), " — it opens in a new browser tab."),
-            tags$li("In iDEP's ", tags$strong("Load Data"), " tab, upload the count matrix, then the design file.")
+            tags$li("In iDEP's ", tags$strong("Load Data"), " tab, upload the count matrix, then the design file."),
+            tags$li("After a DESeq2 run, the ", tags$strong("DEG"), " tab's ",
+                    tags$strong("Full DESeq2 results"), " button downloads lfcSE and the Wald ",
+                    tags$code("stat"), " per comparison, for ranking genes in GSEA.")
           ),
 
           br(),

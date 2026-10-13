@@ -3,7 +3,8 @@
 #
 # Paths default to data\ inside this folder. Any absolute path works.
 #
-# If the iDEP image is present locally, iDEP is started alongside
+# If the iDEP base image is present locally, SalmonFlow's patched iDEP
+# (idep\Dockerfile) is built on top of it if needed and started alongside
 # SalmonFlow so the Results tab can hand off to it. Set the environment
 # variable SALMONFLOW_NO_IDEP=1 to skip that.
 param(
@@ -12,7 +13,8 @@ param(
     [string]$OutDir   = ".\data\output"
 )
 
-$IdepImage = if ($env:IDEP_IMAGE) { $env:IDEP_IMAGE } else { "gexijin/idep:latest" }
+$IdepImage = if ($env:IDEP_IMAGE) { $env:IDEP_IMAGE } else { "salmonflow-idep:latest" }
+$IdepBaseImage = "gexijin/idep:latest"
 $IdepPort  = if ($env:IDEP_PORT)  { $env:IDEP_PORT }  else { "3839" }
 $Network   = "salmonflow-net"
 
@@ -33,11 +35,23 @@ $OutDir   = (Resolve-Path $OutDir).Path
 $TmpDir   = (Resolve-Path ".\data\tmp").Path
 
 # ── iDEP (optional) ───────────────────────────────────────────
-# Started only if the image is already pulled — it is large, and we
-# never trigger that download implicitly.
+# Started only if the base image is already pulled — it is large, and we
+# never trigger that download implicitly. The patched layer on top of it
+# is small, so it is built here when missing.
 $IdepStatus = "disabled (SALMONFLOW_NO_IDEP=1)"
 
 if ($env:SALMONFLOW_NO_IDEP -ne "1") {
+    docker image inspect $IdepImage 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0 -and $IdepImage -eq "salmonflow-idep:latest") {
+        docker image inspect $IdepBaseImage 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Building SalmonFlow's iDEP (one time, about a minute)..."
+            docker build -q -t $IdepImage (Join-Path $PSScriptRoot "idep") | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  iDEP build failed; see: docker build -t $IdepImage idep\"
+            }
+        }
+    }
     docker image inspect $IdepImage 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
 
@@ -58,7 +72,7 @@ if ($env:SALMONFLOW_NO_IDEP -ne "1") {
             }
         }
     } else {
-        $IdepStatus = "not installed - run: docker pull $IdepImage"
+        $IdepStatus = "not installed - run: docker pull $IdepBaseImage"
     }
 }
 

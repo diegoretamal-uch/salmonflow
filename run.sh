@@ -5,7 +5,8 @@
 #
 # Paths default to data/ inside this folder. Any absolute path works.
 #
-# If the iDEP image is present locally, iDEP is started alongside
+# If the iDEP base image is present locally, SalmonFlow's patched iDEP
+# (idep/Dockerfile) is built on top of it if needed and started alongside
 # SalmonFlow so the Results tab can hand off to it. Set
 # SALMONFLOW_NO_IDEP=1 to skip that.
 # ──────────────────────────────────────────────────────────────
@@ -15,7 +16,8 @@ FASTQ_DIR="${1:-$(pwd)/data/input}"
 REF_DIR="${2:-$(pwd)/data/references}"
 OUT_DIR="${3:-$(pwd)/data/output}"
 
-IDEP_IMAGE="${IDEP_IMAGE:-gexijin/idep:latest}"
+IDEP_IMAGE="${IDEP_IMAGE:-salmonflow-idep:latest}"
+IDEP_BASE_IMAGE="gexijin/idep:latest"
 IDEP_PORT="${IDEP_PORT:-3839}"
 NETWORK="salmonflow-net"
 
@@ -27,11 +29,20 @@ SALMONFLOW_PORT="${SALMONFLOW_PORT:-3838}"
 mkdir -p "$FASTQ_DIR" "$REF_DIR" "$OUT_DIR" "$(pwd)/data/tmp"
 
 # ── iDEP (optional) ───────────────────────────────────────────
-# Started only if the image is already pulled — it is large, and we
-# never trigger that download implicitly.
+# Started only if the base image is already pulled — it is large, and we
+# never trigger that download implicitly. The patched layer on top of it
+# is small, so it is built here when missing.
 IDEP_STATUS="disabled (SALMONFLOW_NO_IDEP=1)"
 
 if [ "${SALMONFLOW_NO_IDEP:-0}" != "1" ]; then
+  if ! docker image inspect "$IDEP_IMAGE" >/dev/null 2>&1 \
+     && [ "$IDEP_IMAGE" = "salmonflow-idep:latest" ] \
+     && docker image inspect "$IDEP_BASE_IMAGE" >/dev/null 2>&1; then
+    echo "  Building SalmonFlow's iDEP (one time, about a minute)..."
+    docker build -q -t "$IDEP_IMAGE" "$(dirname "$0")/idep" >/dev/null \
+      || echo "  iDEP build failed; see: docker build -t $IDEP_IMAGE idep/"
+  fi
+
   if docker image inspect "$IDEP_IMAGE" >/dev/null 2>&1; then
 
     docker network inspect "$NETWORK" >/dev/null 2>&1 \
@@ -50,7 +61,7 @@ if [ "${SALMONFLOW_NO_IDEP:-0}" != "1" ]; then
       fi
     fi
   else
-    IDEP_STATUS="not installed — run: docker pull ${IDEP_IMAGE}"
+    IDEP_STATUS="not installed — run: docker pull ${IDEP_BASE_IMAGE}"
   fi
 fi
 

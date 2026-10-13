@@ -34,7 +34,7 @@ docker build -t salmonflow .
 # 3. Optional, one-time: pull iDEP for downstream DE/pathway analysis
 docker pull gexijin/idep:latest
 
-# 4. Run — starts iDEP too, if its image is present
+# 4. Run — builds SalmonFlow's iDEP on top of it (first time only) and starts it
 ./run.sh /path/to/fastqs /path/to/references /path/to/output
 
 # 5. Open browser → http://localhost:3838   (iDEP: http://localhost:3839)
@@ -53,7 +53,7 @@ docker build -t salmonflow .
 # 3. Optional, one-time: pull iDEP for downstream DE/pathway analysis
 docker pull gexijin/idep:latest
 
-# 4. Run — starts iDEP too, if its image is present
+# 4. Run — builds SalmonFlow's iDEP on top of it (first time only) and starts it
 .\run.ps1 C:\path\to\fastqs C:\path\to\references C:\path\to\output
 
 # 5. Open browser → http://localhost:3838   (iDEP: http://localhost:3839)
@@ -86,8 +86,10 @@ git pull
 # 3. Rebuild — fast, only the app layer changed
 docker build -t salmonflow .
 
-# 4. One-time, if you want iDEP
+# 4. iDEP: pull the base once (skip if you already have it), and remove a
+#    running stock iDEP so run.sh replaces it with SalmonFlow's patched one
 docker pull gexijin/idep:latest
+docker rm -f idep 2>/dev/null
 
 # 5. Run as usual
 ./run.sh
@@ -102,6 +104,7 @@ docker rm -f salmonflow 2>$null
 git pull
 docker build -t salmonflow .
 docker pull gexijin/idep:latest
+docker rm -f idep 2>$null
 .\run.ps1
 ```
 
@@ -125,9 +128,9 @@ docker ps
 ```
 
 ```
-CONTAINER ID   IMAGE                 PORTS                        NAMES
-741e50aa2d16   salmonflow            0.0.0.0:3838->3838/tcp       vigorous_newton   <- yours
-3f8ec2d4c107   gexijin/idep:latest   0.0.0.0:3839->3838/tcp       idep              <- leave it
+CONTAINER ID   IMAGE                    PORTS                        NAMES
+741e50aa2d16   salmonflow               0.0.0.0:3838->3838/tcp       vigorous_newton   <- yours
+3f8ec2d4c107   salmonflow-idep:latest   0.0.0.0:3839->3838/tcp       idep              <- leave it
 ```
 
 Find the row whose **IMAGE** is `salmonflow`, then remove it by the name in the
@@ -376,6 +379,44 @@ hands off to
 [**iDEP**](https://github.com/gexijin/idepGolem), which runs locally as a second
 container — no internet access is needed at analysis time.
 
+### SalmonFlow's iDEP build
+
+SalmonFlow runs a lightly patched iDEP, built by `idep/Dockerfile` on top of
+the official `gexijin/idep` 2.4.2 image (pinned by digest). Only the
+`idepGolem` R package is replaced, with
+[diegoretamal-uch/idepGolem](https://github.com/diegoretamal-uch/idepGolem)
+(branch `salmonflow-full-deseq2`, version 2.4.2.1). R, DESeq2 and the
+annotation database are the base image's, so DE results are identical to
+stock iDEP 2.4.2.
+
+The one addition is in the **DEG** tab. Next to **Results** there is a
+**Full DESeq2 results** button (shown only when DESeq2 is the method) that
+downloads `Results_full_DESeq2.csv`. Stock iDEP's export keeps only baseMean,
+log2FC and adjusted p-value. This file keeps every `DESeq2::results()`
+column for each comparison:
+
+| Column | Meaning |
+|--------|---------|
+| `<A>-<B>_log2FC` | log2 fold change, A minus B (unshrunken, same as the Results file) |
+| `<A>-<B>_lfcSE` | standard error of the log2FC |
+| `<A>-<B>_stat` | Wald statistic (log2FC / lfcSE): the ranking metric for GSEA |
+| `<A>-<B>_pvalue` | raw Wald p-value |
+| `<A>-<B>_adjPval` | BH-adjusted p-value (same as the Results file) |
+
+The gene ID, baseMean and processed-data columns are the same as in the
+Results file, so tools that read that file also read this one. With
+**Threshold-based Wald Test** enabled, `stat` and `pvalue` are DESeq2's
+thresholded (`lfcThreshold`) versions, not the plain Wald test.
+
+To rebuild after the fork changes (bump `IDEPGOLEM_SHA` in `idep/Dockerfile`
+first):
+
+```bash
+docker compose build idep && docker rm -f idep && ./run.sh
+# without the compose plugin:
+docker build -t salmonflow-idep:latest idep/ && docker rm -f idep && ./run.sh
+```
+
 ### Starting iDEP
 
 iDEP is defined in `docker-compose.yml`, so it comes up with the rest of the stack:
@@ -388,7 +429,8 @@ docker compose up -d idep     # just iDEP
 Then open **http://localhost:3839** (SalmonFlow stays on 3838), or use the
 **Open iDEP** button in the Results tab.
 
-`run.sh` and `run.ps1` also handle iDEP — **once its image is pulled**, they
+`run.sh` and `run.ps1` also handle iDEP — **once the base image is pulled**, they
+build `salmonflow-idep:latest` on top of it if it is missing (about a minute),
 start it automatically, put both containers on a shared network, and report
 its state at startup:
 
@@ -407,7 +449,7 @@ docker pull gexijin/idep:latest   # one time, large
 ./run.sh                          # starts both
 ```
 
-The scripts never trigger that download themselves — if the image is absent
+The scripts never trigger that download themselves — if the base image is absent
 they print `iDEP: not installed` and start SalmonFlow alone. Set
 `SALMONFLOW_NO_IDEP=1` to skip iDEP even when the image is present, or
 `IDEP_PORT=…` to publish it somewhere other than 3839.
@@ -420,8 +462,8 @@ browser. Stop it with `docker rm -f idep`.
 The iDEP image bundles its own annotation database for 220 plant and animal
 genomes, so it is **large** — iDEP's own documentation gives 10 GB of storage
 and 4 GB of RAM as the minimum, and the published image is considerably bigger
-than SalmonFlow's. The first `docker compose up` will take a while. The compose
-file sets `pull_policy: missing` so it is downloaded only once.
+than SalmonFlow's. Pull it once with `docker pull gexijin/idep:latest`; after
+that, `docker compose up` only builds the small patched layer on top of it.
 
 ### Using it
 
@@ -442,5 +484,6 @@ iDEP is distributed under **CC BY-NC 3.0** — free for non-commercial use.
 Its authors ask to be contacted before local installation at private
 institutions. See the [iDEP repository](https://github.com/gexijin/idepGolem)
 and cite [Ge, Son & Yao (2018), *BMC Bioinformatics*](https://doi.org/10.1186/s12859-018-2486-6)
-if you use it. SalmonFlow only references the published image on Docker Hub;
-it does not redistribute it.
+if you use it. SalmonFlow builds on the published image from Docker Hub and
+does not redistribute it; the patched `idepGolem` source is a public fork under
+the same licence.
