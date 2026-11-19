@@ -4,8 +4,11 @@
 # The patch (https://github.com/diegoretamal-uch/idepGolem, branch
 # salmonflow-full-deseq2) adds a "Full DESeq2 results" download to the
 # DEG tab: every DESeq2::results() column per comparison, including
-# lfcSE and the Wald stat used to rank genes for GSEA. Everything else
-# is upstream iDEP 2.4.2, unchanged.
+# lfcSE and the Wald stat used to rank genes for GSEA. It also adds a
+# "Samples used to fit the DESeq2 model" option to the Experiment Design
+# tab: one model with all samples (upstream behaviour, default) or one
+# model per comparison with only the two groups compared. Everything
+# else is upstream iDEP 2.4.2, unchanged.
 #
 # Only the idepGolem package is replaced. The base image (R, DESeq2 and
 # the bundled annotation database) is reused as-is, so building this
@@ -20,7 +23,7 @@
 FROM gexijin/idep@sha256:ea5b1df64ed7ab1f12057132c08dc934bc0ee74e0b863a4ecce4517dc5a0d847
 
 ARG IDEPGOLEM_REPO=diegoretamal-uch/idepGolem
-ARG IDEPGOLEM_SHA=49fc63e30275340592c18950e83bba3110ddfbad
+ARG IDEPGOLEM_SHA=fb8bbbabb04abd6c8d43e95350352e25c606e4a0
 
 # dependencies = FALSE: everything idepGolem needs is already in the
 # base image; letting remotes resolve them would upgrade packages and
