@@ -14,12 +14,15 @@ RUN wget -q -O /usr/local/bin/fastp http://opengene.org/fastp/fastp.1.3.6 \
     && chmod +x /usr/local/bin/fastp \
     && fastp --version 2>&1 | grep -q "1.3.6"
 
-# ── Salmon 1.10.0 ───────────────────────────────────────────────────
-RUN wget -q https://github.com/COMBINE-lab/salmon/releases/download/v1.10.0/salmon-1.10.0_linux_x86_64.tar.gz \
+# ── Salmon 2.11.0 (Rust rewrite, upstream binary, checksum-verified) ─
+RUN wget -q https://github.com/COMBINE-lab/salmon/releases/download/v2.11.0/salmon-cli-x86_64-unknown-linux-gnu.tar.xz \
+    && echo "e15b1ef0c4bece9c2ce271e2acbafb6ac1dc22b4b038fe8380f849455b9d8527  salmon-cli-x86_64-unknown-linux-gnu.tar.xz" | sha256sum -c - \
     && mkdir -p /opt/salmon \
-    && tar -xzf salmon-1.10.0_linux_x86_64.tar.gz -C /opt/salmon --strip-components=1 \
-    && ln -s /opt/salmon/bin/salmon /usr/local/bin/salmon \
-    && rm salmon-1.10.0_linux_x86_64.tar.gz
+    && tar -xJf salmon-cli-x86_64-unknown-linux-gnu.tar.xz -C /opt/salmon --strip-components=1 \
+    && chmod +x /opt/salmon/salmon \
+    && ln -s /opt/salmon/salmon /usr/local/bin/salmon \
+    && rm salmon-cli-x86_64-unknown-linux-gnu.tar.xz \
+    && salmon --version 2>&1 | grep -q "2.11.0"
 
 # ── FastQC 0.12.1 ───────────────────────────────────────────────────
 RUN wget -q https://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.12.1.zip \

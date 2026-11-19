@@ -149,8 +149,11 @@ pulling or restarting it again later.
 > `docker ps --filter expose=3838` — that matches iDEP as well and would
 > remove it too.
 
-**Your data is safe.** Results live in bind-mounted host folders and no file
-format changed — nothing to migrate.
+**Your data is safe.** Results live in bind-mounted host folders and no output
+file format changed — nothing to migrate. Note that **Salmon 2.11** uses a new
+compact `sshash` index format (v3), so if `data/references/salmon_index` was
+built with an older Salmon 1.x version, select **Build new index** once in the
+References tab.
 
 **Old results won't appear automatically.** The Results tab reads the count
 matrix from the *current session*, so a freshly started app shows "Run the
@@ -275,10 +278,10 @@ By default the scripts use these folders. You can also pass **any absolute path*
 
 | Tool        | Version         | Role                                      |
 |-------------|-----------------|-------------------------------------------|
-| Salmon      | 1.10.0          | Quasi-mapping quantification              |
+| Salmon      | 2.11.0          | Selective-alignment / sketch quantification (Rust) |
 | FastQC      | 0.12.1          | Pre-trimming QC                           |
 | fastp       | 1.3.6           | Adapter trimming and quality filtering    |
-| MultiQC     | 1.34            | Aggregated QC report                      |
+| MultiQC     | 1.35            | Aggregated QC report                      |
 | R           | 4.4.1           | Shiny runtime                             |
 | Bioconductor| 3.19            | Bioinformatics package ecosystem          |
 | tximport    | Bioc 3.19       | Salmon → count matrix                     |
@@ -288,32 +291,32 @@ By default the scripts use these folders. You can also pass **any absolute path*
 
 ## Salmon Parameters
 
-### Exposed in UI (Parametros tab)
+### Exposed in UI (Parameters tab)
 
 | Parameter              | Default | Description                                                   |
 |------------------------|---------|---------------------------------------------------------------|
 | Library type (`-l`)    | `A`     | Auto-detect strand orientation. Set manually if needed (e.g., `ISR`, `ISF`). |
+| Mapping mode           | Selective alignment | Default selective alignment, or ultra-fast alignment-free pseudoalignment (`--sketch`). |
 | GC bias (`--gcBias`)   | ON      | Corrects for GC content bias in fragment sampling.            |
 | Seq bias (`--seqBias`) | ON      | Corrects for sequence-specific bias at read starts.           |
-| Threads (`-p`)         | 4       | Parallelism. Recommended: leave 20-30% of cores for the OS.  |
+| Threads (`-p`)         | Auto    | Parallelism (auto-recommended from detected CPUs minus 1).    |
 
-### Advanced (collapsible, Parametros tab)
+### Advanced (collapsible, Parameters & References tabs)
 
 | Parameter                        | Default | Description                                                                              |
 |----------------------------------|---------|------------------------------------------------------------------------------------------|
-| Validate mappings (`--validateMappings`) | ON | Re-scores and filters mappings for accuracy. Recommended for most workflows.        |
 | Bootstraps (`--numBootstraps`)   | 0       | Enables bootstrap sampling for quantification uncertainty. Set ≥ 100 for sleuth/DTU.   |
-| Min score fraction (`--minScoreFraction`) | 0.65 | Fraction of the optimal alignment score a mapping must achieve to be retained. Lower = more permissive. |
-| Discard orphans (`--discardOrphansQuasi`) | OFF | Discards reads whose mate did not map. Stricter paired-end mode.                  |
+| Min score fraction (`--minScoreFraction`) | 0.65 | Fraction of the optimal alignment score a mapping must achieve to be retained (Selective alignment only). |
+| Low-memory index (`--ramLimit`)  | OFF (8 GiB) | Caps external minimizer-sort RAM at 4 GiB during `salmon index` on memory-constrained systems. |
 
-### Hardcoded (not exposed)
+### Defaults / Internal
 
 | Parameter                | Value  | Reason                                                        |
 |--------------------------|--------|---------------------------------------------------------------|
-| `--validateMappings`     | ON     | Best practice; exposed in Advanced to allow toggling          |
+| Deterministic RAD quant  | ON     | Default in Salmon ≥ 2.6: byte-identical `quant.sf` across thread counts |
 | `--writeUnmappedNames`   | OFF    | Output overhead not needed for standard quantification        |
 | `--numGibbsSamples`      | 0      | Alternative to bootstraps; not exposed to avoid confusion     |
-| `-k` (k-mer size)        | 31     | Standard for reads ≥ 75 bp; configurable in Referencias tab   |
+| `-k` (k-mer size)        | 31     | Standard for reads ≥ 75 bp; configurable in References tab    |
 
 ---
 
@@ -321,8 +324,8 @@ By default the scripts use these folders. You can also pass **any absolute path*
 
 1. **FastQC** — per-file quality report (pre-trimming)
 2. **fastp** — adapter detection (auto for PE), quality trimming
-3. **Salmon index** — build or reuse an existing index
-4. **Salmon quant** — quasi-mapping quantification per sample
+3. **Salmon index** — build or reuse an existing Salmon 2 `sshash` index
+4. **Salmon quant** — selective-alignment (or `--sketch`) quantification per sample
 5. **tximport** — merge per-sample quant.sf into a gene-level count matrix
 6. **MultiQC** — aggregate FastQC + fastp + Salmon reports into one HTML
 

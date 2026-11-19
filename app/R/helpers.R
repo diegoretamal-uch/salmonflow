@@ -84,7 +84,8 @@ parse_salmon_meta <- function(quant_dir) {
       num_processed   = NA,
       num_mapped      = NA,
       mapping_rate    = NA,
-      percent_mapped  = NA
+      percent_mapped  = NA,
+      salmon_version  = NA_character_
     ))
   }
 
@@ -97,7 +98,84 @@ parse_salmon_meta <- function(quant_dir) {
     num_processed  = processed,
     num_mapped     = mapped,
     mapping_rate   = mapped / processed,
-    percent_mapped = rate
+    percent_mapped = rate,
+    salmon_version = as.character(meta$salmon_version %||% NA_character_)
+  )
+}
+
+#' Validate that a directory holds a readable Salmon 2.x index (format >= v3)
+#' @param index_dir Path to Salmon index directory
+#' @return List with $valid (logical), $legacy (logical), and $message (character)
+check_salmon_index <- function(index_dir) {
+  if (is.null(index_dir) || length(index_dir) == 0 ||
+      is.na(index_dir) || !nzchar(index_dir)) {
+    return(list(valid = FALSE, legacy = FALSE, message = "Not selected"))
+  }
+
+  info_path <- file.path(index_dir, "info.json")
+  if (!file.exists(info_path)) {
+    return(list(
+      valid   = FALSE,
+      legacy  = FALSE,
+      message = paste("Directory selected (info.json not found):", basename(index_dir))
+    ))
+  }
+
+  info <- tryCatch(jsonlite::fromJSON(info_path), error = function(e) NULL)
+  if (is.null(info)) {
+    return(list(
+      valid   = FALSE,
+      legacy  = FALSE,
+      message = paste("Invalid index (unreadable info.json):", basename(index_dir))
+    ))
+  }
+
+  # C++ Salmon 1.x indices write versionInfo.json and omit salmon_version in info.json
+  has_cpp_version_file <- file.exists(file.path(index_dir, "versionInfo.json"))
+  if (has_cpp_version_file || is.null(info$salmon_version)) {
+    return(list(
+      valid   = FALSE,
+      legacy  = TRUE,
+      message = paste(
+        "Incompatible legacy Salmon 1.x index — select 'Build new index' for Salmon 2.11:",
+        basename(index_dir)
+      )
+    ))
+  }
+
+  # Salmon 2.9+ / 2.11 requires index_version >= 3 (sshash format v6)
+  idx_ver <- suppressWarnings(as.integer(info$index_version %||% 0L))
+  if (is.na(idx_ver) || idx_ver < 3L) {
+    return(list(
+      valid   = FALSE,
+      legacy  = TRUE,
+      message = sprintf(
+        "Outdated Salmon 2.x index (format v%s, built with %s) — rebuild required for Salmon 2.11: %s",
+        as.character(info$index_version %||% 0L),
+        as.character(info$salmon_version),
+        basename(index_dir)
+      )
+    ))
+  }
+
+  if (!file.exists(file.path(index_dir, "refseq.bin"))) {
+    return(list(
+      valid   = FALSE,
+      legacy  = FALSE,
+      message = paste("Incomplete Salmon index (refseq.bin missing):", basename(index_dir))
+    ))
+  }
+
+  list(
+    valid          = TRUE,
+    legacy         = FALSE,
+    salmon_version = as.character(info$salmon_version),
+    index_version  = idx_ver,
+    k              = info$k,
+    message        = sprintf("Valid Salmon %s index (k=%s): %s",
+                             as.character(info$salmon_version),
+                             as.character(info$k %||% "?"),
+                             basename(index_dir))
   )
 }
 

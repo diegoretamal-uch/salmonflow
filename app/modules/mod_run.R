@@ -112,12 +112,14 @@ mod_run_server <- function(id, shared) {
       n_samples <- if (is.null(samples)) 0 else nrow(samples)
       lib <- if (shared$lib_type_se) "Single-end" else "Paired-end"
       trim <- if (shared$trimming_enabled) "ON" else "OFF"
+      map_mode <- if (isTRUE(shared$salmon_sketch)) "Sketch (--sketch)" else "Selective alignment"
 
       tags$div(class = "config-summary",
         tags$p(tags$strong("Samples: "), n_samples, " | ",
                tags$strong("Type: "), lib, " | ",
                tags$strong("Trimming: "), trim),
         tags$p(tags$strong("Salmon library: "), shared$salmon_libtype, " | ",
+               tags$strong("Mapping: "), map_mode, " | ",
                tags$strong("GC bias: "), ifelse(shared$salmon_gcbias, "ON", "OFF"), " | ",
                tags$strong("Seq bias: "), ifelse(shared$salmon_seqbias, "ON", "OFF"), " | ",
                tags$strong("Threads: "), shared$salmon_threads),
@@ -351,6 +353,13 @@ mod_run_server <- function(id, shared) {
         add_log("Error: no transcriptome FASTA selected. Go to the References tab.", "error")
         return()
       }
+      if (!shared$build_new_index) {
+        idx_check <- check_salmon_index(shared$salmon_index_dir)
+        if (!isTRUE(idx_check$valid)) {
+          add_log(paste("Error:", idx_check$message, "Go to the References tab."), "error")
+          return()
+        }
+      }
       if (is.null(shared$gtf_path) || length(shared$gtf_path) == 0) {
         add_log("Error: no GTF file selected. Go to the References tab.", "error")
         return()
@@ -390,14 +399,14 @@ mod_run_server <- function(id, shared) {
         salmon_index_dir      = shared$salmon_index_dir %||% "",
         build_new_index       = isTRUE(shared$build_new_index),
         decoy_aware           = isTRUE(shared$decoy_aware),
-        sparse_index          = isTRUE(shared$sparse_index),
+        index_ram_limit       = shared$index_ram_limit,
         genome_fasta          = shared$genome_fasta %||% "",
         kmer_size             = shared$kmer_size,
         salmon_libtype        = shared$salmon_libtype,
+        salmon_sketch         = isTRUE(shared$salmon_sketch),
         salmon_gcbias         = isTRUE(shared$salmon_gcbias),
         salmon_seqbias        = isTRUE(shared$salmon_seqbias),
         salmon_threads        = shared$salmon_threads,
-        salmon_validate       = isTRUE(shared$salmon_validate),
         salmon_bootstraps     = shared$salmon_bootstraps,
         salmon_min_score_frac = shared$salmon_min_score_frac,
         salmon_discard_orphans = isTRUE(shared$salmon_discard_orphans),
@@ -406,7 +415,7 @@ mod_run_server <- function(id, shared) {
         output_dir            = shared$output_dir,
         resume                = resume
       )
-      jsonlite::write_json(params, params_file, auto_unbox = TRUE)
+      jsonlite::write_json(params, params_file, auto_unbox = TRUE, null = "null")
 
       # Reset state
       rv$log_pos      <- 0L

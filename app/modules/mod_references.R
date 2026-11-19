@@ -21,8 +21,8 @@ mod_references_ui <- function(id) {
               tags$li(tags$strong("GTF Annotation:"), " Required. Maps transcript IDs to gene names, allowing tximport to aggregate transcript counts to the gene level."),
               tags$li(tags$strong("Adapter FASTA:"), " Optional. Overrides fastp's automatic adapter detection."),
               tags$li(tags$strong("Index Mode:"), " Use an existing pre-built Salmon index to save time, or build a new one from the transcriptome FASTA."),
-              tags$li(tags$strong("Decoy-Aware Indexing:"), " Recommended. Includes the full genome as a 'decoy' to prevent genomic contamination from falsely mapping to transcripts. Requires a genome FASTA and >= 16 GB RAM."),
-              tags$li(tags$strong("Sparse Index:"), " Reduces the index RAM footprint by 30-50% during build/run, but slightly slows down quantification.")
+              tags$li(tags$strong("Decoy-Aware Indexing:"), " Recommended. Includes the full genome as a 'decoy' to prevent genomic contamination from falsely mapping to transcripts. Requires a genome FASTA and >= 12-16 GB RAM."),
+              tags$li(tags$strong("Low-Memory Index Build (--ramLimit):"), " Salmon 2 uses a compact sshash minimizer dictionary by default. Enabling low-memory mode caps external minimizer-sort RAM at 4 GiB (instead of the default 8 GiB) without affecting quantification speed or accuracy.")
             )
           )
         )
@@ -78,7 +78,7 @@ mod_references_ui <- function(id) {
     fluidRow(
       column(12,
         box(
-          title = tagList("Salmon Index", html_tooltip("Configure whether to use an existing Salmon index or build a new one. Decoy-aware indexing improves quantification accuracy but requires more RAM.")),
+          title = tagList("Salmon Index", html_tooltip("Configure whether to use an existing Salmon 2 index or build a new one. Decoy-aware indexing improves quantification accuracy.")),
           status = "primary", solidHeader = FALSE, width = 12,
 
           radioButtons(ns("index_mode"), "Index Mode",
@@ -101,9 +101,9 @@ mod_references_ui <- function(id) {
               helpText("Higher accuracy — requires genome FASTA (.fa/.fa.gz). The pipeline generates gentrome and decoys.txt automatically.",
                        tags$br(),
                        tags$strong("System Requirements: "),
-                       "including the full genome in the index significantly increases RAM",
-                       " (and disk) usage during construction. For the human genome, ~16 GB of RAM or more is recommended.",
-                       " If the system is low on memory, combine this option with a sparse index.")
+                       "including the full genome in the index increases RAM",
+                       " (and disk) usage during construction. For mammalian genomes, ~12-16 GB of RAM is recommended.",
+                       " On memory-constrained systems, combine this option with Low-memory index build.")
             ),
             column(4,
               conditionalPanel(
@@ -120,12 +120,11 @@ mod_references_ui <- function(id) {
               selectInput(ns("kmer_size"), "k-mer size",
                           choices = c(21, 23, 25, 27, 29, 31),
                           selected = 31),
-              checkboxInput(ns("sparse_index"), "Sparse index (--sparse)", value = FALSE),
-              helpText("Reduces RAM usage during index construction (~30-50%). Recommended if the system has low memory.",
+              checkboxInput(ns("low_ram_index"), "Low-memory index build (--ramLimit 4 GiB)", value = FALSE),
+              helpText("Caps external minimizer-sort RAM at 4 GiB (default: 8 GiB), spilling to disk sooner on low-memory hosts.",
                        tags$br(),
                        tags$strong("Note: "),
-                       "uses a sparser hash table, making subsequent quantification",
-                       " slightly slower.")
+                       "Salmon 2 builds a compact sshash index by default; lowering --ramLimit does not slow down subsequent quantification.")
             )
           )
         )
@@ -188,12 +187,7 @@ mod_references_server <- function(id, shared, volumes) {
     output$index_dir_status <- renderText({
       p <- parse_dir(input$index_dir)
       if (is.null(p) || length(p) == 0) "Not selected"
-      else {
-        # Check if it looks like a valid Salmon index
-        has_info <- file.exists(file.path(p, "info.json"))
-        if (has_info) paste("Valid index:", basename(p))
-        else paste("Directory selected (info.json not found):", basename(p))
-      }
+      else check_salmon_index(p)$message
     })
 
     # ── Sync to shared reactive values ─────────────────────
@@ -204,7 +198,8 @@ mod_references_server <- function(id, shared, volumes) {
       shared$kmer_size           <- as.integer(input$kmer_size)
       shared$build_new_index     <- (input$index_mode == "build")
       shared$decoy_aware         <- input$decoy_aware
-      shared$sparse_index        <- input$sparse_index
+      shared$low_ram_index       <- isTRUE(input$low_ram_index)
+      shared$index_ram_limit     <- if (isTRUE(input$low_ram_index)) 4L else NULL
 
       adapter <- parse_file(input$adapter_file)
       shared$adapter_fasta <- if (!is.null(adapter) && length(adapter) > 0) as.character(adapter) else NULL

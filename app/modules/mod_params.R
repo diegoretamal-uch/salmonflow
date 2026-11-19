@@ -30,8 +30,8 @@ mod_params_ui <- function(id) {
             tags$ul(
               tags$li(tags$strong("fastp (Trimming):"), " Quality-based filtering and adapter removal. Use the sliders to set minimum quality thresholds for read ends (5'/3'), the sliding window average quality, and the minimum read length (recommended: 30-50bp) to discard short, non-specific reads."),
               tags$li(tags$strong("Temporary Files:"), " Policy for deleting intermediate FASTQ files to manage disk space. You can choose to delete raw FASTQs after trimming (saves ~50% peak space), or trimmed FASTQs after Salmon quantification."),
-              tags$li(tags$strong("Salmon (Quantification):"), " Set strandedness (use 'A' for auto-detection) and enable GC/Sequence bias corrections to account for PCR and sequencing-specific biases."),
-              tags$li(tags$strong("Salmon (Advanced):"), " Enable 'Validate mappings' for selective alignment (highly recommended). Set bootstraps to >= 100 to evaluate technical/quantification uncertainty. Keep at 0 for standard gene-level differential expression."),
+              tags$li(tags$strong("Salmon (Quantification):"), " Set strandedness (use 'A' for auto-detection), choose the mapping mode — Selective alignment (default, highest accuracy) or Sketch pseudoalignment (--sketch, ultra-fast alignment-free mode) — and enable GC/Sequence bias corrections."),
+              tags$li(tags$strong("Salmon (Advanced):"), " Set bootstraps to >= 100 to evaluate technical/quantification uncertainty (keep at 0 for standard gene-level differential expression), and tune --minScoreFraction when using Selective alignment."),
               tags$li(tags$strong("tximport (Normalization):"), " Methods to summarize transcript-level abundance estimates to gene-level count matrices. 'lengthScaledTPM' is recommended for downstream DESeq2/EdgeR analyses. Enable 'Ignore version' to strip Ensembl decimal suffixes (e.g. '.1').")
             )
           )
@@ -112,7 +112,7 @@ mod_params_ui <- function(id) {
       # ── Salmon Parameters ──────────────────────────────────
       column(6,
         box(
-          title = tagList("Salmon", html_tooltip("Set the quantification parameters, thread count, and bias correction options for Salmon.")),
+          title = tagList("Salmon", html_tooltip("Set the quantification parameters, mapping mode, thread count, and bias correction options for Salmon 2.")),
           status = "primary", solidHeader = FALSE, width = 12,
 
           selectInput(ns("salmon_libtype"), "Library type",
@@ -124,6 +124,13 @@ mod_params_ui <- function(id) {
                                   "SF (SE, forward)" = "SF",
                                   "U (SE, unstranded)" = "U"),
                       selected = "A"),
+
+          selectInput(ns("salmon_map_mode"), "Mapping mode",
+                      choices = c(
+                        "Selective alignment (default, recommended)" = "sa",
+                        "Sketch pseudoalignment (--sketch, faster)"  = "sketch"
+                      ),
+                      selected = "sa"),
 
           checkboxInput(ns("salmon_gcbias"), "GC bias correction", value = TRUE),
 
@@ -147,20 +154,24 @@ mod_params_ui <- function(id) {
         ),
 
         box(
-          title = tagList("Salmon — Advanced", html_tooltip("Configure advanced Salmon options such as mapping validation, bootstrap sampling, and minimum score fraction.")),
+          title = tagList("Salmon — Advanced", html_tooltip("Configure advanced Salmon 2 options such as bootstrap sampling and minimum alignment score fraction.")),
           status = "primary", solidHeader = FALSE, width = 12,
           collapsible = TRUE, collapsed = TRUE,
-
-          checkboxInput(ns("salmon_validate"),
-                        "Validate mappings (--validateMappings)",
-                        value = TRUE),
 
           sliderInput(ns("salmon_bootstraps"), "Bootstrap samples (--numBootstraps)",
                       min = 0, max = 200, value = 0, step = 10),
 
-          numericInput(ns("salmon_min_score_frac"),
-                       "Min score fraction (--minScoreFraction)",
-                       value = 0.65, min = 0.0, max = 1.0, step = 0.05),
+          conditionalPanel(
+            condition = paste0("input['", ns("salmon_map_mode"), "'] == 'sa'"),
+            numericInput(ns("salmon_min_score_frac"),
+                         "Min score fraction (--minScoreFraction)",
+                         value = 0.65, min = 0.0, max = 1.0, step = 0.05)
+          ),
+
+          conditionalPanel(
+            condition = paste0("input['", ns("salmon_map_mode"), "'] == 'sketch'"),
+            helpText("Note: --minScoreFraction applies only to Selective alignment and is omitted in --sketch mode.")
+          ),
 
           if (FALSE) {
             checkboxInput(ns("salmon_discard_orphans"),
@@ -170,7 +181,7 @@ mod_params_ui <- function(id) {
 
           helpText(
             "Bootstraps: set >= 100 for uncertainty quantification (sleuth, DTU).",
-            "Min score fraction: lower = more permissive mapping."
+            "Min score fraction: lower = more permissive selective alignment."
           )
         ),
 
@@ -213,10 +224,10 @@ mod_params_server <- function(id, shared) {
       shared$delete_trimmed_after_quant  <- (input$temp_file_policy == "delete_trimmed")
 
       shared$salmon_libtype         <- input$salmon_libtype
+      shared$salmon_sketch          <- identical(input$salmon_map_mode, "sketch")
       shared$salmon_gcbias          <- input$salmon_gcbias
       shared$salmon_seqbias         <- input$salmon_seqbias
       shared$salmon_threads         <- input$salmon_threads
-      shared$salmon_validate        <- input$salmon_validate
       shared$salmon_bootstraps      <- input$salmon_bootstraps
       shared$salmon_min_score_frac  <- input$salmon_min_score_frac
       shared$salmon_discard_orphans <- input$salmon_discard_orphans

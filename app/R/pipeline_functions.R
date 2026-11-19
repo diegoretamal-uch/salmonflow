@@ -190,13 +190,33 @@ run_fastp <- function(r1, r2 = NULL, out_dir, sample_name,
 #'   The function auto-generates the required gentrome + decoys.txt.
 #' @param kmer k-mer size (default 31)
 #' @param threads Number of threads
+#' @param ram_limit Optional RAM ceiling in GiB for sshash external minimizer sort (--ramLimit)
 #' @param log_callback Function(msg, type) for live logging
 #' @return List with exit_status and index_dir
 build_salmon_index <- function(fasta, outdir, decoy = NULL,
-                               kmer = 31, threads = 4, sparse = FALSE,
+                               kmer = 31, threads = 4, ram_limit = NULL,
                                log_callback = NULL) {
 
   dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
+
+  # If outdir previously held a C++ Salmon 1.x pufferfish index, clean up its
+  # legacy binary files so stale ~1 GB artifacts and versionInfo.json do not linger.
+  if (file.exists(file.path(outdir, "versionInfo.json"))) {
+    legacy_files <- c(
+      "versionInfo.json", "complete_ref_lens.bin", "ctable.bin",
+      "ctg_offsets.bin", "duplicate_clusters.tsv", "mphf.bin",
+      "pos.bin", "pre_indexing.log", "rank.bin", "refAccumLengths.bin",
+      "ref_indexing.log", "reflengths.bin", "seq.bin"
+    )
+    existing_legacy <- file.path(outdir, legacy_files)
+    existing_legacy <- existing_legacy[file.exists(existing_legacy)]
+    if (length(existing_legacy) > 0) {
+      unlink(existing_legacy)
+      if (!is.null(log_callback)) {
+        log_callback("Salmon index: cleaned legacy Salmon 1.x index files before rebuild", "info")
+      }
+    }
+  }
 
   if (!is.null(log_callback)) log_callback("Salmon index: building...", "info")
 
@@ -274,10 +294,11 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
       "Salmon index: GENCODE format detected — adding --gencode flag", "info")
   }
 
-  if (isTRUE(sparse)) {
-    args <- c(args, "--sparse")
+  if (!is.null(ram_limit) && !is.na(ram_limit) && as.integer(ram_limit) > 0L) {
+    ram_gib <- as.integer(ram_limit)
+    args <- c(args, "--ramLimit", as.character(ram_gib))
     if (!is.null(log_callback)) log_callback(
-      "Salmon index: sparse mode enabled — lower memory usage", "info")
+      sprintf("Salmon index: external minimizer-sort RAM ceiling set to %d GiB (--ramLimit)", ram_gib), "info")
   }
 
   result <- processx::run("salmon", args = args, echo = FALSE,
@@ -308,25 +329,32 @@ build_salmon_index <- function(fasta, outdir, decoy = NULL,
 #' @param seq_bias Logical, enable seqBias correction
 #' @param threads Number of threads
 #' @param is_se Logical, TRUE for single-end
+#' @param sketch Logical, TRUE for alignment-free pseudoalignment (--sketch);
+#'   FALSE (default) uses Salmon 2's default Selective Alignment mode.
+#' @param bootstraps Integer, number of bootstrap replicates
+#' @param min_score_frac Numeric, --minScoreFraction (Selective Alignment only)
+#' @param discard_orphans Logical, --discardOrphansQuasi (Selective Alignment only)
 #' @param log_callback Function(msg, type) for live logging
 #' @return List with exit_status and quant_dir
 run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
                              lib_type = "A", gc_bias = TRUE, seq_bias = TRUE,
                              threads = 4, is_se = FALSE,
-                             validate = TRUE, bootstraps = 0,
+                             sketch = FALSE, bootstraps = 0,
                              min_score_frac = 0.65, discard_orphans = FALSE,
                              log_callback = NULL) {
 
   sample_out <- file.path(outdir, sample_name)
   dir.create(sample_out, showWarnings = FALSE, recursive = TRUE)
 
-  if (!is.null(log_callback)) log_callback(paste("Salmon quant:", sample_name, "— running..."), "info")
+  mode_label <- if (isTRUE(sketch)) "sketch (--sketch)" else "selective alignment"
+  if (!is.null(log_callback)) {
+    log_callback(sprintf("Salmon quant: %s — running (%s)...", sample_name, mode_label), "info")
+  }
 
   args <- c("quant",
             "-i", index_dir,
             "-l", lib_type,
             "-p", as.character(threads),
-            "--minScoreFraction", as.character(min_score_frac),
             "-o", sample_out)
 
   if (is_se) {
@@ -335,11 +363,18 @@ run_salmon_quant <- function(index_dir, r1, r2 = NULL, outdir, sample_name,
     args <- c(args, "-1", r1, "-2", r2)
   }
 
-  if (validate)        args <- c(args, "--validateMappings")
-  if (gc_bias)         args <- c(args, "--gcBias")
-  if (seq_bias)        args <- c(args, "--seqBias")
-  if (bootstraps > 0)  args <- c(args, "--numBootstraps", as.character(bootstraps))
-  if (discard_orphans) args <- c(args, "--discardOrphansQuasi")
+  if (isTRUE(sketch)) {
+    args <- c(args, "--sketch")
+  } else {
+    # Selective alignment is the default mode in Salmon 2.x; score/orphan
+    # flags apply exclusively to selective alignment (inert under --sketch).
+    args <- c(args, "--minScoreFraction", as.character(min_score_frac))
+    if (isTRUE(discard_orphans)) args <- c(args, "--discardOrphansQuasi")
+  }
+
+  if (isTRUE(gc_bias))  args <- c(args, "--gcBias")
+  if (isTRUE(seq_bias)) args <- c(args, "--seqBias")
+  if (bootstraps > 0)   args <- c(args, "--numBootstraps", as.character(bootstraps))
 
   result <- processx::run("salmon", args = args, echo = FALSE,
                           error_on_status = FALSE,

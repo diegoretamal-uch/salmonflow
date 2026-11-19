@@ -266,12 +266,20 @@ join_fq_pre <- function() {
 if (isTRUE(p$build_new_index)) {
   write_log("-- Step 2: Build Salmon Index --", "info")
 
-  index_done <- resume && file.exists(file.path(index_dir, "info.json"))
+  idx_check  <- check_salmon_index(index_dir)
+  index_done <- resume && isTRUE(idx_check$valid)
   if (index_done) {
-    write_log("Salmon index: skipped (previous index found)", "info")
+    write_log("Salmon index: skipped (compatible Salmon 2 index found)", "info")
   } else {
+    if (resume && isTRUE(idx_check$legacy)) {
+      write_log(paste("Salmon index: legacy index detected — rebuilding for Salmon 2.11 (",
+                      idx_check$message, ")"), "warn")
+    }
     decoy_file <- if (isTRUE(p$decoy_aware)) {
       gf <- p$genome_fasta %||% ""; if (nchar(gf) > 0) gf else NULL
+    } else NULL
+    ram_limit_val <- if (!is.null(p$index_ram_limit) && !is.na(p$index_ram_limit)) {
+      as.integer(p$index_ram_limit)
     } else NULL
 
     idx_result <- with_cpu_block("Salmon index", threads, write_log,
@@ -281,7 +289,7 @@ if (isTRUE(p$build_new_index)) {
         decoy        = decoy_file,
         kmer         = as.integer(p$kmer_size %||% 31L),
         threads      = threads,
-        sparse       = isTRUE(p$sparse_index),
+        ram_limit    = ram_limit_val,
         log_callback = write_log
       ))
 
@@ -298,6 +306,15 @@ if (isTRUE(p$build_new_index)) {
   write_state(step, total, TRUE)
 } else {
   write_log("-- Step 2: Salmon Index (using existing) --", "info")
+  idx_check <- check_salmon_index(index_dir)
+  if (!isTRUE(idx_check$valid)) {
+    join_fq_pre()
+    stop_cpu_sampler(write_log)
+    write_log(paste("Pipeline aborted:", idx_check$message), "error")
+    write_state(step, total, FALSE)
+    quit(status = 1, save = "no")
+  }
+  write_log(idx_check$message, "info")
 }
 
 # Barrier: FastQC (pre) must be finished before the per-sample loop starts,
@@ -459,7 +476,7 @@ for (i in seq_len(n_samples)) {
       seq_bias        = isTRUE(p$salmon_seqbias),
       threads         = quant_threads,
       is_se           = is_se,
-      validate        = isTRUE(p$salmon_validate),
+      sketch          = isTRUE(p$salmon_sketch),
       bootstraps      = as.integer(p$salmon_bootstraps    %||% 0L),
       min_score_frac  = as.numeric(p$salmon_min_score_frac %||% 0.65),
       discard_orphans = isTRUE(p$salmon_discard_orphans),
@@ -569,6 +586,7 @@ write_run_summary <- function(multiqc = list()) {
   }
   L <- c(L,
     paste0("Salmon library type: ", p$salmon_libtype %||% "A"),
+    paste0("Salmon mapping mode: ", if (isTRUE(p$salmon_sketch)) "Sketch (--sketch)" else "Selective alignment"),
     paste0("GC bias correction: ", yn(p$salmon_gcbias)),
     paste0("Sequence bias correction: ", yn(p$salmon_seqbias)),
     paste0("Bootstraps: ", p$salmon_bootstraps %||% 0L),
