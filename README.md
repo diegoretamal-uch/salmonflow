@@ -13,9 +13,13 @@ https://github.com/user-attachments/assets/a7072ae9-3d94-43aa-9d24-74ed035acb77
 
 ## Prerequisites
 
-- [Docker Desktop](https://docs.docker.com/get-docker/) installed and running
-  - Windows: requires WSL2 backend (Docker Desktop installs this automatically)
-  - Linux/Mac: Docker Engine is sufficient
+- An **x86_64 (Intel/AMD) computer**. Salmon and fastp are installed as
+  x86_64 binaries, so ARM machines (Windows on Snapdragon, Apple Silicon
+  Macs) cannot build the image natively.
+- Docker:
+  - Windows: Docker Desktop with WSL2 — follow the
+    [Windows step-by-step guide](#windows-step-by-step-guide) below
+  - Linux/Mac: Docker Engine or [Docker Desktop](https://docs.docker.com/get-docker/)
 
 ---
 
@@ -40,27 +44,170 @@ docker pull gexijin/idep:latest
 # 5. Open browser → http://localhost:3838   (iDEP: http://localhost:3839)
 ```
 
-### Windows (PowerShell)
+### Windows
+
+See the [Windows step-by-step guide](#windows-step-by-step-guide) right below.
+
+---
+
+## Windows Step-by-Step Guide
+
+SalmonFlow runs inside Docker, which on Windows uses a small Linux virtual
+machine (WSL2). Part A is done **once per computer**; Part B is what you do
+**every time** you analyse data.
+
+### Part A — One-time installation
+
+#### A1. Check your computer
+
+| Requirement | How to check |
+|---|---|
+| Windows 10 (22H2) or Windows 11 | Settings → System → About → *Windows specifications* |
+| x86_64 processor | Settings → System → About → *System type* must say **x64-based processor**. ARM processors are not supported. |
+| Virtualization enabled | Task Manager → Performance → CPU → *Virtualization: Enabled*. If it says *Disabled*, turn on VT-x / AMD-V (SVM) in the BIOS. |
+| RAM | 16 GB recommended; 8 GB works only with a pre-built Salmon index |
+| Free disk on `C:` | ~30 GB (Docker images, plus iDEP if you use it), plus space for your FASTQs and results |
+
+#### A2. Install WSL2
+
+Open **PowerShell as administrator** (right-click the Start button →
+*Terminal (Admin)*) and run:
 
 ```powershell
-# 1. Clone the repo
-git clone https://github.com/diegoretamal-uch/salmonflow
-cd salmonflow
-
-# 2. Build the image (~10 min, one-time)
-docker build -t salmonflow .
-
-# 3. Optional, one-time: pull iDEP for downstream DE/pathway analysis
-docker pull gexijin/idep:latest
-
-# 4. Run — builds SalmonFlow's iDEP on top of it (first time only) and starts it
-.\run.ps1 C:\path\to\fastqs C:\path\to\references C:\path\to\output
-
-# 5. Open browser → http://localhost:3838   (iDEP: http://localhost:3839)
+wsl --install
 ```
 
-> **Note for Windows users:** if PowerShell blocks the script, run once:
-> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+Restart the computer when it asks. If it says WSL is already installed, run
+`wsl --update` instead.
+
+#### A3. Install Docker Desktop
+
+1. Download it from <https://docs.docker.com/desktop/setup/install/windows-install/> and install it.
+2. Keep **Use WSL 2 instead of Hyper-V** checked during installation.
+3. Open Docker Desktop and wait until the bottom-left corner says
+   **Engine running**.
+
+> Docker Desktop is free for personal use, education and small
+> organizations. Larger organizations need a paid subscription — check with
+> your institution.
+
+#### A4. Give Docker enough memory
+
+By default the Linux VM may use only **half** of your RAM. Salmon needs
+more, especially when building an index. Set the limit yourself:
+
+1. In File Explorer, type `%UserProfile%` in the address bar and press Enter.
+2. Create a file named exactly **`.wslconfig`** (in Notepad: *Save as* →
+   *Save as type: All files*, so it does not become `.wslconfig.txt`).
+3. Paste this, choosing `memory` from the table:
+
+   ```ini
+   [wsl2]
+   memory=12GB
+   processors=8
+   swap=8GB
+   ```
+
+   | RAM in your computer | `memory=` |
+   |---|---|
+   | 8 GB | `6GB` |
+   | 16 GB | `12GB` |
+   | 32 GB | `26GB` |
+   | 64 GB | `56GB` |
+
+   `processors` = the *Logical processors* number shown in Task Manager →
+   Performance → CPU. Don't add comments at the end of these lines; WSL may
+   ignore the value.
+
+4. Close Docker Desktop, run `wsl --shutdown` in PowerShell, and open Docker
+   Desktop again.
+
+This is a **maximum, not a reservation**: the VM starts small and only grows
+when a tool needs the memory. Always leave ~4 GB for Windows; if the limit
+equals your full RAM, Windows can freeze during heavy steps.
+
+#### A5. Download SalmonFlow
+
+Install [Git for Windows](https://git-scm.com/download/win) (default
+options are fine), then in a normal PowerShell window:
+
+```powershell
+cd C:\
+git clone https://github.com/diegoretamal-uch/salmonflow
+cd salmonflow
+```
+
+> **Avoid OneDrive folders** (Desktop, Documents and Downloads are often
+> synced). Use a plain folder such as `C:\salmonflow` or `D:\salmonflow`.
+> Folder names without spaces or accents are safest.
+
+#### A6. Build SalmonFlow (~10 minutes)
+
+```powershell
+docker build -t salmonflow .
+```
+
+#### A7. Optional: install iDEP (differential expression)
+
+Only needed if you want the **Open iDEP** button in the Results tab. It is a
+large download:
+
+```powershell
+docker pull gexijin/idep:latest
+```
+
+#### A8. Allow the start script to run
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+If you downloaded SalmonFlow as a ZIP instead of with `git clone`, also run
+`Unblock-File .\run.ps1`.
+
+### Part B — Every time you use it
+
+1. **Open Docker Desktop** and wait for *Engine running*.
+2. **Put your files in place.** The simplest option is the folders that come
+   with SalmonFlow:
+   - FASTQ files (`.fastq.gz`) → `C:\salmonflow\data\input`
+   - Transcriptome FASTA, GTF, existing Salmon index → `C:\salmonflow\data\references`
+   - Results will appear in `C:\salmonflow\data\output`
+3. **Start SalmonFlow** in PowerShell:
+
+   ```powershell
+   cd C:\salmonflow
+   .\run.ps1
+   ```
+
+   To use folders elsewhere, pass them in this order — FASTQs, references,
+   output:
+
+   ```powershell
+   .\run.ps1 D:\data\fastqs D:\data\refs D:\data\results
+   ```
+
+4. **Open <http://localhost:3838>** in your browser. Keep the PowerShell
+   window open while you work: closing it stops SalmonFlow.
+5. **When you are done**, press `Ctrl+C` in the PowerShell window. If you
+   started iDEP, stop it with `docker rm -f idep`. To give all memory back to
+   Windows, close Docker Desktop and run `wsl --shutdown`.
+
+> **Long runs:** turn off sleep (Settings → System → Power) while the
+> pipeline runs. If the computer sleeps or the window is closed, start again
+> and use **Resume Analysis** in the Run tab — completed steps are skipped.
+
+### Windows troubleshooting
+
+| Problem | Fix |
+|---|---|
+| *The term 'docker' is not recognized* | Docker Desktop is not installed, or PowerShell was opened before installing it. Close and reopen PowerShell. |
+| *error during connect* / *cannot connect to the Docker daemon* | Docker Desktop is not open, or still starting. Wait for *Engine running*. |
+| *running scripts is disabled on this system* | Run step A8. |
+| `port is already allocated` | SalmonFlow is already running in another window, or another program uses port 3838 — see [Ports](#ports). |
+| Pipeline is much slower than on Linux | Expected for files on `C:`/`D:`: Docker reads Windows folders through a slower layer. Exclude the data folder from Windows Defender scanning. For best speed, keep the data inside WSL and use `./run.sh` from the Ubuntu terminal. |
+| Salmon index step crashes or the computer freezes | Not enough memory: raise `memory=` (A4) if you can, or enable **Low-memory index** in the References tab. A genome-decoy index of human/mouse needs more than 16 GB; build it once on a bigger machine and copy the `salmon_index` folder into `data\references`. |
+| Task Manager shows *VmmemWSL* using lots of RAM after a run | Linux keeps recently read files cached. It is released gradually; `wsl --shutdown` frees it at once. |
 
 ---
 
